@@ -1,6 +1,6 @@
 """
 Ingestion Pipeline Orchestration Module.
-Coordinates source loading, RSS fetching, normalization, and SQLite persistence.
+Coordinates source loading, RSS fetching, normalization, SQLite persistence, and health auditing.
 """
 
 import logging
@@ -11,37 +11,14 @@ from ingestion.rss_reader import fetch_rss_feed
 from ingestion.normalizer import normalize_article
 from storage import save_article
 from database import init_db, get_connection
+from ingestion.health import evaluate_source_health, format_health_report
 
 logger = logging.getLogger(__name__)
 
 
 def format_summary_report(summary: dict) -> str:
-    """Format the ingestion summary dictionary into a clean human-readable table."""
-    lines = [
-        "\n" + "=" * 80,
-        "INGESTION PIPELINE EXECUTION SUMMARY",
-        "=" * 80,
-        f"{'Source Name':<28} | {'Fetched':<7} | {'Norm':<5} | {'Insert':<6} | {'Dupl':<5} | {'Inval':<5} | {'Status':<7}",
-        "-" * 80,
-    ]
-
-    for s in summary["sources"]:
-        status_display = s["status"].upper()
-        lines.append(
-            f"{s['name'][:28]:<28} | {s['fetched']:<7} | {s['normalized']:<5} | "
-            f"{s['inserted']:<6} | {s['duplicates']:<5} | {s['invalid']:<5} | {status_display:<7}"
-        )
-        if s["error"]:
-            lines.append(f"  -> Error: {s['error']}")
-
-    lines.extend([
-        "-" * 80,
-        f"TOTALS: Sources: {summary['total_sources']} (Succeeded: {summary['successful_sources']}, Failed: {summary['failed_sources']})",
-        f"        Fetched: {summary['total_fetched']} | Normalized: {summary['total_normalized']} | "
-        f"Inserted: {summary['total_inserted']} | Duplicates: {summary['total_duplicates']} | Invalid: {summary['total_invalid']}",
-        "=" * 80 + "\n",
-    ])
-    return "\n".join(lines)
+    """Format the ingestion summary dictionary using the standard health report."""
+    return format_health_report(summary)
 
 
 def run_pipeline(
@@ -50,8 +27,8 @@ def run_pipeline(
     timeout: int = 10,
 ) -> dict:
     """
-    Execute the end-to-end ingestion pipeline:
-    Sources -> RSS Fetching -> Normalization -> Storage.
+    Execute the end-to-end ingestion pipeline with source reliability and health tracking:
+    Sources -> RSS Fetching -> Normalization -> Storage -> Health Evaluation.
 
     Args:
         sources: Optional list of source dictionaries (defaults to enabled sources from sources.py).
@@ -59,7 +36,7 @@ def run_pipeline(
         timeout: Timeout in seconds for RSS requests.
 
     Returns:
-        dict: Complete ingestion metrics and per-source breakdown.
+        dict: Complete ingestion metrics, health statuses, and per-source diagnostics.
     """
     logger.info("Starting AI Intelligence Monitor ingestion pipeline...")
 
@@ -83,7 +60,8 @@ def run_pipeline(
     total_inserted = 0
     total_duplicates = 0
     total_invalid = 0
-    successful_sources = 0
+    healthy_sources = 0
+    warning_sources = 0
     failed_sources = 0
 
     try:
@@ -92,70 +70,98 @@ def run_pipeline(
             source_url = source.get("url", "")
             logger.info(f"Processing source: '{source_name}' ({source_url})")
 
-            src_summary = {
-                "name": source_name,
-                "url": source_url,
-                "status": "success",
-                "fetched": 0,
-                "normalized": 0,
-                "inserted": 0,
-                "duplicates": 0,
-                "invalid": 0,
-                "error": None,
-            }
+            fetch_success = False
+            raw_entries = []
+            fetch_error = None
 
             # 1. Fetch entries from feed
             try:
                 raw_entries = fetch_rss_feed(source_url, timeout=timeout)
-                src_summary["fetched"] = len(raw_entries)
+                fetch_success = True
                 logger.info(f"Fetched {len(raw_entries)} raw entries from '{source_name}'")
             except Exception as e:
                 logger.error(f"Failed to fetch feed for source '{source_name}': {e}")
-                src_summary["status"] = "failed"
-                src_summary["error"] = str(e)
+                fetch_error = str(e)
+
+            # Metrics for this source
+            inserted_count = 0
+            duplicate_count = 0
+            invalid_count = 0
+            normalized_count = 0
+            missing_dates_count = 0
+            valid_dates = []
+
+            # 2. Normalize and Store each entry if fetch succeeded
+            if fetch_success:
+                for entry in raw_entries:
+                    try:
+                        article = normalize_article(entry, source)
+                        normalized_count += 1
+                        pub_date = article.get("published_at")
+                        if pub_date:
+                            valid_dates.append(pub_date)
+                        else:
+                            missing_dates_count += 1
+                    except Exception as norm_err:
+                        logger.warning(f"Invalid entry in source '{source_name}': {norm_err}")
+                        invalid_count += 1
+                        continue
+
+                    # 3. Store normalized article
+                    try:
+                        was_inserted = save_article(article, conn=conn)
+                        if was_inserted:
+                            inserted_count += 1
+                        else:
+                            duplicate_count += 1
+                    except Exception as store_err:
+                        logger.error(f"Storage error for article from '{source_name}': {store_err}")
+                        invalid_count += 1
+
+                # Commit changes for this source
+                try:
+                    conn.commit()
+                except Exception as commit_err:
+                    logger.error(f"Failed to commit transaction for '{source_name}': {commit_err}")
+
+            oldest_pub = min(valid_dates) if valid_dates else None
+            newest_pub = max(valid_dates) if valid_dates else None
+
+            # 4. Evaluate health status deterministically
+            src_health = evaluate_source_health(
+                name=source_name,
+                url=source_url,
+                fetch_success=fetch_success,
+                fetched=len(raw_entries),
+                normalized=normalized_count,
+                inserted=inserted_count,
+                duplicates=duplicate_count,
+                invalid=invalid_count,
+                missing_dates=missing_dates_count,
+                newest_published_at=newest_pub,
+                oldest_published_at=oldest_pub,
+                error=fetch_error,
+            )
+
+            if src_health["status"] == "HEALTHY":
+                healthy_sources += 1
+            elif src_health["status"] == "WARNING":
+                warning_sources += 1
+            else:
                 failed_sources += 1
-                source_summaries.append(src_summary)
-                continue  # Continue to the next source!
 
-            # 2. Normalize and Store each entry
-            for entry in raw_entries:
-                try:
-                    article = normalize_article(entry, source)
-                    src_summary["normalized"] += 1
-                except Exception as norm_err:
-                    logger.warning(f"Invalid entry in source '{source_name}': {norm_err}")
-                    src_summary["invalid"] += 1
-                    continue
+            source_summaries.append(src_health)
 
-                # 3. Store normalized article
-                try:
-                    was_inserted = save_article(article, conn=conn)
-                    if was_inserted:
-                        src_summary["inserted"] += 1
-                    else:
-                        src_summary["duplicates"] += 1
-                except Exception as store_err:
-                    logger.error(f"Storage error for article from '{source_name}': {store_err}")
-                    src_summary["invalid"] += 1
-
-            # Commit changes for this source
-            try:
-                conn.commit()
-            except Exception as commit_err:
-                logger.error(f"Failed to commit transaction for '{source_name}': {commit_err}")
-
-            successful_sources += 1
-            source_summaries.append(src_summary)
-
-            total_fetched += src_summary["fetched"]
-            total_normalized += src_summary["normalized"]
-            total_inserted += src_summary["inserted"]
-            total_duplicates += src_summary["duplicates"]
-            total_invalid += src_summary["invalid"]
+            total_fetched += src_health["fetched"]
+            total_normalized += src_health["normalized"]
+            total_inserted += src_health["inserted"]
+            total_duplicates += src_health["duplicates"]
+            total_invalid += src_health["invalid"]
 
             logger.info(
-                f"Completed '{source_name}': {src_summary['inserted']} inserted, "
-                f"{src_summary['duplicates']} duplicates, {src_summary['invalid']} invalid"
+                f"Completed '{source_name}' [{src_health['status']}]: "
+                f"{src_health['inserted']} inserted, {src_health['duplicates']} duplicates, "
+                f"{src_health['invalid']} invalid"
             )
 
     finally:
@@ -168,7 +174,9 @@ def run_pipeline(
 
     summary = {
         "total_sources": len(sources),
-        "successful_sources": successful_sources,
+        "successful_sources": healthy_sources + warning_sources,
+        "healthy_sources": healthy_sources,
+        "warning_sources": warning_sources,
         "failed_sources": failed_sources,
         "total_fetched": total_fetched,
         "total_normalized": total_normalized,
@@ -178,8 +186,8 @@ def run_pipeline(
         "sources": source_summaries,
     }
 
-    # Print human-readable summary
-    print(format_summary_report(summary))
+    # Print formatted health report
+    print(format_health_report(summary))
 
     return summary
 
