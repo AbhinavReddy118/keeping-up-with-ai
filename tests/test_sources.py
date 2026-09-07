@@ -3,14 +3,14 @@ from sources import get_sources, validate_source_config, DEFAULT_SOURCES
 
 def test_get_sources_default_enabled_only():
     sources = get_sources(enabled_only=True)
-    assert len(sources) == 3
+    assert len(sources) == 7
     for source in sources:
         assert source["enabled"] is True
 
 
 def test_get_sources_all_includes_disabled():
     sources = get_sources(enabled_only=False)
-    assert len(sources) == 4
+    assert len(sources) == 8
     disabled_sources = [s for s in sources if not s["enabled"]]
     assert len(disabled_sources) == 1
     assert disabled_sources[0]["name"] == "Sample Disabled Feed"

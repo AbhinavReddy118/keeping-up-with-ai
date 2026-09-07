@@ -5,11 +5,29 @@ Centralized RSS source configuration and validation for the AI Intelligence Moni
 REQUIRED_KEYS = {"name", "url", "type", "enabled"}
 VALID_TYPES = {"rss", "atom"}
 
-# Default configured AI news RSS sources
+# Default configured AI news RSS sources (verified working endpoints)
 DEFAULT_SOURCES = [
     {
-        "name": "Hacker News AI",
-        "url": "https://hnrss.org/newest?q=AI",
+        "name": "OpenAI News",
+        "url": "https://openai.com/news/rss.xml",
+        "type": "rss",
+        "enabled": True,
+    },
+    {
+        "name": "Google DeepMind Blog",
+        "url": "https://deepmind.google/blog/rss.xml",
+        "type": "rss",
+        "enabled": True,
+    },
+    {
+        "name": "Microsoft Research",
+        "url": "https://www.microsoft.com/en-us/research/feed/",
+        "type": "rss",
+        "enabled": True,
+    },
+    {
+        "name": "Hugging Face Blog",
+        "url": "https://huggingface.co/blog/feed.xml",
         "type": "rss",
         "enabled": True,
     },
@@ -26,10 +44,28 @@ DEFAULT_SOURCES = [
         "enabled": True,
     },
     {
+        "name": "Hacker News AI",
+        "url": "https://hnrss.org/newest?q=AI",
+        "type": "rss",
+        "enabled": True,
+    },
+    {
         "name": "Sample Disabled Feed",
         "url": "https://example.com/disabled-feed.xml",
         "type": "rss",
         "enabled": False,
+    },
+]
+
+# Documented limitations for major organizations without official public RSS/Atom feeds
+UNSUPPORTED_SOURCES = [
+    {
+        "name": "Anthropic News & Research",
+        "reason": "Anthropic does not provide an official public RSS/Atom feed. Blog endpoints return 404; site is client-rendered.",
+    },
+    {
+        "name": "Meta AI Blog",
+        "reason": "Meta AI (ai.meta.com) does not maintain a public RSS feed. Corporate Meta newsroom feed is not AI-specific.",
     },
 ]
 

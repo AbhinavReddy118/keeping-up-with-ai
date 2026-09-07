@@ -1,22 +1,14 @@
 import logging
-from database import init_db, get_connection
+from database import init_db
+from ingestion.pipeline import run_pipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def main():
-    logging.info("Initializing AI Intelligence Monitor database...")
+    logging.info("Starting AI Intelligence Monitor...")
     init_db()
-    
-    # Simple verification check
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='articles';")
-        table_exists = cursor.fetchone()
-        
-    if table_exists:
-        logging.info("Database initialized successfully. Table 'articles' is ready.")
-    else:
-        logging.error("Database initialization failed. Table 'articles' was not created.")
+    summary = run_pipeline()
+    return summary
 
 if __name__ == "__main__":
     main()
