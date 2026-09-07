@@ -1,76 +1,67 @@
-Keeping Up With AI
+# Keeping Up With AI
 
-An automated system that continuously monitors the AI ecosystem and keeps me updated on important developments in AI.
+> A personal AI intelligence pipeline that continuously tracks new models, research, tools, companies, and major developments across the AI ecosystem.
 
-It collects information from multiple sources, filters duplicate stories, analyzes and ranks important developments, and delivers updates through a web interface and Telegram.
+[![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python)](https://www.python.org/)
+[![SQLite](https://img.shields.io/badge/Database-SQLite-003B57?logo=sqlite)](https://www.sqlite.org/)
+[![Tests](https://img.shields.io/badge/Tests-passing-brightgreen)]()
+[![Status](https://img.shields.io/badge/Status-In%20Development-orange)]()
 
-Why?
+---
 
-AI is changing extremely quickly. New models, research, tools, companies, products, and techniques appear every day.
+## The Problem
 
-Following everything manually across dozens of sources is time-consuming, so I built a system to do the monitoring for me.
+AI changes faster than it is practical to follow manually.
 
-How It Works
+New model releases, research papers, developer tools, open-source projects, company announcements, and industry developments appear across hundreds of sources.
 
-AI Sources
-    ↓
-Data Ingestion
-    ↓
-Normalization
-    ↓
-Deduplication
-    ↓
-AI Analysis
-    ↓
-Importance Ranking
-    ↓
-Web Interface + Telegram
+I built this project to answer one question:
 
-The pipeline continuously collects new information, converts it into a common format, removes duplicate developments, uses an LLM to analyze the content, and surfaces the information that matters most.
+### **"What changed in AI today, and what actually matters?"**
 
-Tech Stack
+---
 
-* Python
-* SQLite
-* RSS / APIs
-* Pydantic
-* LLM APIs
-* Embeddings
-* Telegram Bot API
-* Web interface
-* pytest
-* Git / GitHub
+## What It Does
 
-Current Status
+The system continuously:
 
-* Project setup
-* SQLite database
-* RSS/Atom ingestion
-* Source configuration
-* Data normalization
-* Database ingestion
-* Deduplication
-* LLM analysis
-* Importance ranking
-* Telegram notifications
-* Web interface
-* Continuous automation
+**Collects** → **Cleans** → **Deduplicates** → **Analyzes** → **Ranks** → **Delivers**
 
-Running Locally
+| Stage | What happens |
+|---|---|
+| 📡 Ingestion | Collects updates from configured AI sources |
+| 🧹 Normalization | Converts different source formats into a common structure |
+| 🔎 Deduplication | Detects the same development appearing across multiple sources |
+| 🤖 AI Analysis | Classifies and summarizes important developments |
+| 📊 Ranking | Determines which developments deserve attention |
+| 🌐 Web | Provides a searchable view of collected intelligence |
+| 📱 Telegram | Sends important updates directly to Telegram |
 
-git clone <repository-url>
-cd ai_news_digest
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
+---
 
-Run tests:
+## Architecture
 
-pytest
-
-Project Goal
-
-The goal is to build a practical end-to-end data pipeline that turns a constantly changing stream of AI information into a useful personal intelligence feed.
-
-Built by Abhinav Reddy.
+```text
+                  AI ECOSYSTEM
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+       RSS / APIs              Other Sources
+          │                         │
+          └────────────┬────────────┘
+                       ↓
+                 DATA INGESTION
+                       ↓
+                 NORMALIZATION
+                       ↓
+                 DEDUPLICATION
+                       ↓
+                SQLite Database
+                       ↓
+                 AI ANALYSIS
+                       ↓
+              IMPORTANCE RANKING
+                       │
+              ┌────────┴────────┐
+              ↓                 ↓
+        WEB INTERFACE        TELEGRAM
