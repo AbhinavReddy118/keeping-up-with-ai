@@ -19,3 +19,6 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mock")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
+LLM_BATCH_SIZE = int(os.getenv("LLM_BATCH_SIZE", "10"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+

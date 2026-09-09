@@ -24,4 +24,36 @@ def init_db(db_path=None):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS article_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER NOT NULL UNIQUE,
+                relevance_score REAL,
+                summary TEXT,
+                key_points TEXT,
+                topics TEXT,
+                technologies TEXT,
+                companies TEXT,
+                people TEXT,
+                models TEXT,
+                event_type TEXT,
+                novelty TEXT,
+                confidence REAL,
+                entities TEXT,
+                prompt_version TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                raw_response TEXT,
+                status TEXT NOT NULL,
+                error_type TEXT,
+                error_message TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(article_id) REFERENCES articles(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_analysis_status ON article_analysis(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_analysis_article_id ON article_analysis(article_id)")
         conn.commit()
+

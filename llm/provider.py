@@ -338,7 +338,7 @@ def get_llm_provider(
         return MockLLMProvider(**kwargs)
 
     if selected in {"openai", "openrouter", "openai_compatible"}:
-        resolved_key = (api_key or LLM_API_KEY or "").strip()
+        resolved_key = (api_key if api_key is not None else LLM_API_KEY or "").strip()
         if not resolved_key:
             raise LLMConfigurationError(
                 f"LLM_API_KEY is required for provider '{selected}'. "
@@ -347,11 +347,33 @@ def get_llm_provider(
 
         # Provider-specific defaults
         if selected == "openrouter":
-            resolved_base = (base_url or LLM_BASE_URL or "https://openrouter.ai/api/v1").strip()
-            resolved_model = (model or LLM_MODEL or "openai/gpt-4o-mini").strip()
+            if base_url is not None:
+                resolved_base = base_url.strip()
+            elif LLM_PROVIDER == "openrouter" and LLM_BASE_URL:
+                resolved_base = LLM_BASE_URL.strip()
+            else:
+                resolved_base = "https://openrouter.ai/api/v1"
+
+            if model is not None:
+                resolved_model = model.strip()
+            elif LLM_PROVIDER == "openrouter" and LLM_MODEL:
+                resolved_model = LLM_MODEL.strip()
+            else:
+                resolved_model = "openai/gpt-4o-mini"
         else:
-            resolved_base = (base_url or LLM_BASE_URL or "https://api.openai.com/v1").strip()
-            resolved_model = (model or LLM_MODEL or "gpt-4o-mini").strip()
+            if base_url is not None:
+                resolved_base = base_url.strip()
+            elif (LLM_PROVIDER in {"openai", "openai_compatible"}) and LLM_BASE_URL:
+                resolved_base = LLM_BASE_URL.strip()
+            else:
+                resolved_base = "https://api.openai.com/v1"
+
+            if model is not None:
+                resolved_model = model.strip()
+            elif (LLM_PROVIDER in {"openai", "openai_compatible"}) and LLM_MODEL:
+                resolved_model = LLM_MODEL.strip()
+            else:
+                resolved_model = "gpt-4o-mini"
 
         return OpenAICompatibleProvider(
             api_key=resolved_key,
@@ -360,6 +382,7 @@ def get_llm_provider(
             timeout=timeout,
             provider_name=selected,
         )
+
 
     raise LLMConfigurationError(
         f"Unsupported LLM provider: '{selected}'. Supported providers for Task 2.9.2: 'mock', 'openai', 'openrouter'."
