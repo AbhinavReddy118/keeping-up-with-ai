@@ -65,3 +65,16 @@ The system continuously:
               ┌────────┴────────┐
               ↓                 ↓
         WEB INTERFACE        TELEGRAM
+```
+
+---
+
+## LLM Analysis Foundation (Task 2.9.1)
+
+The system includes a provider-independent foundation for structured article intelligence in `llm/`:
+
+* **Structured Schema (`AnalysisResult`)**: Validates extracted attributes including `relevance_score`, `summary`, `key_points`, `topics`, `technologies`, `companies`, `models`, `people`, `event_type`, `novelty`, and `confidence`.
+* **Provider Abstraction (`LLMProvider`)**: Separates analysis logic from specific LLM vendors. Includes a deterministic `MockLLMProvider` for offline testing and development.
+* **Environment Configuration**: Configured via environment variables (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`) loaded from `.env` via `python-dotenv`.
+* **Safe Offline Execution**: Automated unit tests use the mock provider; **zero network or live API calls** occur during `pytest`.
+* **Non-Destructive**: Existing database articles are **not automatically analyzed yet**; this task establishes the typed contract and analyzer interfaces for future integration.
