@@ -5,6 +5,8 @@ Provider abstraction and implementations for LLM article analysis.
 from abc import ABC, abstractmethod
 import json
 import logging
+import urllib.request
+import urllib.error
 from typing import Optional
 from llm.models import AnalysisRequest, AnalysisResult
 from llm.exceptions import (
@@ -15,7 +17,7 @@ from llm.exceptions import (
     LLMMalformedResponseError,
     LLMSchemaValidationError,
 )
-from llm.prompts import ANALYSIS_PROMPT_VERSION
+from llm.prompts import ANALYSIS_PROMPT_VERSION, SYSTEM_PROMPT, build_analysis_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ class LLMProvider(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Name of the provider (e.g. 'mock', 'openai', 'anthropic')."""
+        """Name of the provider (e.g. 'mock', 'openai', 'openrouter')."""
         pass
 
     @abstractmethod
@@ -76,7 +78,6 @@ class MockLLMProvider(LLMProvider):
         elif self.simulate_error == "malformed":
             raise LLMMalformedResponseError("Mock provider returned invalid non-JSON output: 'ERROR: Internal Server'")
         elif self.simulate_error == "schema":
-            # Return JSON missing required keys
             bad_data = {"some_irrelevant_key": "data"}
             raise LLMSchemaValidationError(f"Analysis result missing required keys: {bad_data}")
         elif self.simulate_error == "config":
@@ -94,7 +95,6 @@ class MockLLMProvider(LLMProvider):
         title_lower = request.title.lower()
         summary_text = (request.summary or "").strip()
 
-        # Identify simple keywords for realistic mock analysis
         topics = ["Artificial Intelligence"]
         technologies = []
         companies = []
@@ -134,7 +134,6 @@ class MockLLMProvider(LLMProvider):
         if "claude" in title_lower:
             models.append("Claude")
 
-        # Determine relevance score
         ai_signals = ["ai", "model", "learning", "gpt", "neural", "robotics", "intelligence", "agent", "data", "training", "research"]
         matched_signals = sum(1 for s in ai_signals if s in title_lower)
         relevance_score = min(1.0, max(0.6, 0.5 + (matched_signals * 0.1)))
@@ -166,32 +165,202 @@ class MockLLMProvider(LLMProvider):
         )
 
 
-def get_llm_provider(provider_name: Optional[str] = None, **kwargs) -> LLMProvider:
+class OpenAICompatibleProvider(LLMProvider):
+    """
+    HTTP REST provider for OpenAI and OpenAI-compatible endpoints (OpenRouter, Groq, local Ollama, etc.).
+    Avoids third-party vendor SDK dependencies by using standard library urllib.request.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        base_url: str = "https://api.openai.com/v1",
+        timeout: float = 30.0,
+        provider_name: str = "openai",
+    ):
+        if not api_key or not isinstance(api_key, str) or not api_key.strip():
+            raise LLMConfigurationError("LLM_API_KEY is required and cannot be empty.")
+
+        self._api_key = api_key.strip()
+        self.model = model.strip() if model and model.strip() else "gpt-4o-mini"
+        self.base_url = base_url.rstrip("/") if base_url else "https://api.openai.com/v1"
+        self.timeout = float(timeout)
+        self._provider_name = provider_name.strip().lower()
+
+    @property
+    def name(self) -> str:
+        return self._provider_name
+
+    def analyze(self, request: AnalysisRequest) -> AnalysisResult:
+        """
+        Execute live HTTP request to chat completions endpoint with structured JSON enforcement.
+        """
+        user_prompt = build_analysis_prompt(
+            title=request.title,
+            source=request.source,
+            published_at=request.published_at,
+            summary=request.summary,
+        )
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+
+        endpoint = f"{self.base_url}/chat/completions"
+        payload_bytes = json.dumps(payload).encode("utf-8")
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key}",
+                "User-Agent": "AI-News-Digest/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            logger.info(f"Sending LLM analysis request to {self.name} ({self.model})...")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                resp_bytes = resp.read()
+                resp_text = resp_bytes.decode("utf-8")
+
+        except urllib.error.HTTPError as e:
+            # Mask credentials completely; never leak API keys in logs or exceptions
+            if e.code in (401, 403):
+                logger.error(f"Authentication failed with {self.name} API (HTTP {e.code}).")
+                raise LLMConfigurationError(
+                    f"Authentication failed with {self.name} API (HTTP {e.code}). Please verify LLM_API_KEY."
+                ) from e
+            elif e.code == 429:
+                logger.error(f"{self.name} API rate limit or quota exceeded (HTTP 429).")
+                raise LLMRateLimitError(
+                    f"{self.name} API rate limit or quota exceeded (HTTP 429)."
+                ) from e
+            elif e.code in (500, 502, 503, 504):
+                logger.error(f"{self.name} API server error (HTTP {e.code}).")
+                raise LLMProviderUnavailableError(
+                    f"{self.name} API service temporarily unavailable (HTTP {e.code})."
+                ) from e
+            else:
+                logger.error(f"{self.name} API HTTP error: {e.code}")
+                raise LLMProviderUnavailableError(
+                    f"{self.name} API returned HTTP error {e.code}: {e.reason}"
+                ) from e
+
+        except (urllib.error.URLError, TimeoutError) as e:
+            # Handle socket / request timeouts
+            err_str = str(e).lower()
+            if "timed out" in err_str or isinstance(e, TimeoutError):
+                logger.error(f"{self.name} request timed out after {self.timeout}s.")
+                raise LLMTimeoutError(f"Request to {self.name} API timed out after {self.timeout}s.") from e
+            else:
+                logger.error(f"Network error connecting to {self.name} API: {e}")
+                raise LLMProviderUnavailableError(
+                    f"Network error connecting to {self.name} API: {getattr(e, 'reason', e)}"
+                ) from e
+
+        except Exception as e:
+            logger.error(f"Unexpected error communicating with {self.name} API: {e}")
+            raise LLMProviderUnavailableError(
+                f"Unexpected error communicating with {self.name} API: {e}"
+            ) from e
+
+        # Parse response JSON
+        try:
+            resp_json = json.loads(resp_text)
+        except json.JSONDecodeError as e:
+            raise LLMMalformedResponseError(f"{self.name} response is not valid JSON: {e}") from e
+
+        choices = resp_json.get("choices")
+        if not choices or not isinstance(choices, list):
+            raise LLMMalformedResponseError(f"{self.name} response missing 'choices' array.")
+
+        message = choices[0].get("message", {})
+        raw_content = message.get("content")
+        if not raw_content or not isinstance(raw_content, str):
+            raise LLMMalformedResponseError(f"{self.name} response missing message content.")
+
+        # Parse extracted JSON content
+        try:
+            parsed_analysis = json.loads(raw_content.strip())
+        except json.JSONDecodeError as e:
+            raise LLMMalformedResponseError(
+                f"Model output content is not valid JSON: {raw_content[:200]}"
+            ) from e
+
+        # Validate through schema
+        return AnalysisResult.from_dict(
+            parsed_analysis,
+            prompt_version=request.prompt_version,
+            raw_response=raw_content,
+        )
+
+
+def get_llm_provider(
+    provider_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    timeout: float = 30.0,
+    **kwargs,
+) -> LLMProvider:
     """
     Factory function to retrieve configured LLMProvider.
 
     Args:
         provider_name: Provider identifier (defaults to config.LLM_PROVIDER).
+        api_key: Optional API key override (defaults to config.LLM_API_KEY).
+        model: Optional model name override (defaults to config.LLM_MODEL).
+        base_url: Optional base URL override (defaults to config.LLM_BASE_URL).
+        timeout: Network request timeout in seconds.
 
     Returns:
         LLMProvider instance.
 
     Raises:
-        LLMConfigurationError: If requested provider is unsupported or missing configuration.
+        LLMConfigurationError: If requested provider is unsupported or missing credentials.
     """
-    from config import LLM_PROVIDER
+    from config import LLM_PROVIDER, LLM_MODEL, LLM_API_KEY, LLM_BASE_URL
 
     selected = (provider_name or LLM_PROVIDER or "mock").strip().lower()
 
     if selected == "mock":
         return MockLLMProvider(**kwargs)
 
-    if selected in {"openai", "anthropic", "gemini", "openrouter"}:
-        raise LLMConfigurationError(
-            f"Provider '{selected}' is recognized but live API integration is deferred to a future task. "
-            "Task 2.9.1 provides the architectural foundation. Use 'mock' provider for current testing."
+    if selected in {"openai", "openrouter", "openai_compatible"}:
+        resolved_key = (api_key or LLM_API_KEY or "").strip()
+        if not resolved_key:
+            raise LLMConfigurationError(
+                f"LLM_API_KEY is required for provider '{selected}'. "
+                "Please configure LLM_API_KEY in your .env file or environment."
+            )
+
+        # Provider-specific defaults
+        if selected == "openrouter":
+            resolved_base = (base_url or LLM_BASE_URL or "https://openrouter.ai/api/v1").strip()
+            resolved_model = (model or LLM_MODEL or "openai/gpt-4o-mini").strip()
+        else:
+            resolved_base = (base_url or LLM_BASE_URL or "https://api.openai.com/v1").strip()
+            resolved_model = (model or LLM_MODEL or "gpt-4o-mini").strip()
+
+        return OpenAICompatibleProvider(
+            api_key=resolved_key,
+            model=resolved_model,
+            base_url=resolved_base,
+            timeout=timeout,
+            provider_name=selected,
         )
 
     raise LLMConfigurationError(
-        f"Unsupported LLM provider: '{selected}'. Supported providers for Task 2.9.1: 'mock'."
+        f"Unsupported LLM provider: '{selected}'. Supported providers for Task 2.9.2: 'mock', 'openai', 'openrouter'."
     )

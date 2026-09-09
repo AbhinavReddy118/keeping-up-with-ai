@@ -1,13 +1,17 @@
 """
-Offline unit tests for the LLM Analysis Foundation (Task 2.9.1).
+Offline unit tests for the LLM Analysis Foundation & Live Provider Integration (Tasks 2.9.1 & 2.9.2).
 No real network or external API calls are made.
 """
 
+import json
+import urllib.error
+from unittest.mock import patch, MagicMock
 import pytest
 from llm import (
     AnalysisRequest,
     AnalysisResult,
     MockLLMProvider,
+    OpenAICompatibleProvider,
     get_llm_provider,
     prepare_article_input,
     analyze_article,
@@ -36,6 +40,27 @@ def sample_article():
     }
 
 
+@pytest.fixture
+def valid_llm_output_dict():
+    return {
+        "relevance_score": 0.95,
+        "summary": "OpenAI launched GPT-4o, an omni-model integrating voice, vision, and text capabilities.",
+        "key_points": ["Real-time multimodal reasoning", "Lower latency and cost than GPT-4 Turbo"],
+        "topics": ["Artificial Intelligence", "Multimodal AI"],
+        "technologies": ["Transformers", "Audio-Vision Integration"],
+        "companies": ["OpenAI"],
+        "people": [],
+        "models": ["GPT-4o"],
+        "event_type": "model_release",
+        "novelty": "breakthrough",
+        "confidence": 0.98,
+    }
+
+
+# ==============================================================================
+# EXISTING TASK 2.9.1 TESTS (PRESERVED)
+# ==============================================================================
+
 def test_valid_article_to_valid_analysis_result(sample_article):
     """1. Valid article -> valid AnalysisResult."""
     provider = MockLLMProvider()
@@ -61,7 +86,6 @@ def test_missing_summary_produces_valid_request(sample_article):
     assert request.summary is None
     assert request.title == sample_article["title"]
 
-    # Analyzer succeeds even without summary
     provider = MockLLMProvider()
     result = analyze_article(article_no_summary, provider=provider)
     assert isinstance(result, AnalysisResult)
@@ -92,7 +116,6 @@ def test_mock_provider_returns_structured_result(sample_article):
     assert result.companies == ["OpenAI"]
     assert result.entities["companies"] == ["OpenAI"]
 
-    # Test conversion to dict
     res_dict = result.to_dict()
     assert res_dict["relevance_score"] == 0.95
     assert res_dict["summary"] == "Custom deterministic test summary."
@@ -100,19 +123,16 @@ def test_mock_provider_returns_structured_result(sample_article):
 
 def test_invalid_provider_output_is_rejected(sample_article):
     """4. Invalid provider output is rejected via schema validation error."""
-    # Test provider simulating malformed non-JSON
     malformed_provider = MockLLMProvider(simulate_error="malformed")
     with pytest.raises(LLMMalformedResponseError, match="invalid non-JSON output"):
         analyze_article(sample_article, provider=malformed_provider)
 
-    # Test provider simulating schema validation failure (missing required keys)
     schema_err_provider = MockLLMProvider(simulate_error="schema")
     with pytest.raises(LLMSchemaValidationError, match="missing required keys"):
         analyze_article(sample_article, provider=schema_err_provider)
 
-    # Test direct AnalysisResult schema validation with invalid score
     invalid_data = {
-        "relevance_score": 1.5,  # Out of bounds (> 1.0)
+        "relevance_score": 1.5,
         "summary": "Invalid test summary",
         "key_points": [],
         "topics": [],
@@ -130,9 +150,8 @@ def test_invalid_provider_output_is_rejected(sample_article):
 
 def test_missing_or_unsupported_api_configuration():
     """5. Missing/unsupported API configuration is handled correctly."""
-    # Attempting to use an unconfigured live provider raises LLMConfigurationError
-    with pytest.raises(LLMConfigurationError, match="deferred to a future task"):
-        get_llm_provider("openai")
+    with pytest.raises(LLMConfigurationError, match="LLM_API_KEY is required"):
+        get_llm_provider("openai", api_key="")
 
     with pytest.raises(LLMConfigurationError, match="Unsupported LLM provider"):
         get_llm_provider("nonexistent_provider")
@@ -164,15 +183,12 @@ def test_prompt_version_is_present():
 
 def test_article_input_sanitization():
     """8. Article input sanitizes inputs, handles truncated lengths, and enforces required fields."""
-    # Missing title raises ValueError
     with pytest.raises(ValueError, match="missing required 'title'"):
         prepare_article_input({"source": "OpenAI", "summary": "No title"})
 
-    # Missing source raises ValueError
     with pytest.raises(ValueError, match="missing required 'source'"):
         prepare_article_input({"title": "A Title", "summary": "No source"})
 
-    # Very long summary is truncated safely
     huge_summary = "A" * 3000
     req = prepare_article_input(
         {"title": "Valid Title", "source": "Valid Source", "summary": huge_summary},
@@ -184,7 +200,6 @@ def test_article_input_sanitization():
 
 def test_no_real_network_call_during_offline_analysis(sample_article, monkeypatch):
     """9. No real network/API call occurs during offline analysis."""
-    # Block socket connections to guarantee zero external network calls
     import socket
     def guard(*args, **kwargs):
         raise AssertionError("Unexpected network call attempted during unit test!")
@@ -194,3 +209,186 @@ def test_no_real_network_call_during_offline_analysis(sample_article, monkeypatc
     result = analyze_article(sample_article, provider=provider)
     assert result is not None
     assert result.summary is not None
+
+
+# ==============================================================================
+# TASK 2.9.2: LIVE HTTP PROVIDER INTEGRATION TESTS (MOCKED HTTP)
+# ==============================================================================
+
+def test_openai_compatible_provider_successful_response(sample_article, valid_llm_output_dict):
+    """1. Successful HTTP provider response parses and validates correctly."""
+    mock_http_response = json.dumps({
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps(valid_llm_output_dict),
+                }
+            }
+        ]
+    }).encode("utf-8")
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = mock_http_response
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = OpenAICompatibleProvider(api_key="test-key", model="gpt-4o-mini")
+        result = analyze_article(sample_article, provider=provider)
+
+        assert isinstance(result, AnalysisResult)
+        assert result.relevance_score == 0.95
+        assert result.companies == ["OpenAI"]
+        assert result.models == ["GPT-4o"]
+        assert result.event_type == "model_release"
+        assert result.novelty == "breakthrough"
+        assert result.raw_response is not None
+
+
+def test_openai_compatible_provider_malformed_json_response(sample_article):
+    """2. Malformed non-JSON response raises LLMMalformedResponseError."""
+    mock_http_response = b"<!DOCTYPE html><html><body>Error Gateway 502</body></html>"
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = mock_http_response
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMMalformedResponseError, match="not valid JSON"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_openai_compatible_provider_schema_violation(sample_article):
+    """3. JSON response missing required schema fields raises LLMSchemaValidationError."""
+    incomplete_dict = {
+        "summary": "Missing other required fields",
+    }
+    mock_http_response = json.dumps({
+        "choices": [{"message": {"content": json.dumps(incomplete_dict)}}]
+    }).encode("utf-8")
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = mock_http_response
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMSchemaValidationError, match="missing required keys"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_openai_compatible_provider_http_401_auth_error(sample_article):
+    """4. HTTP 401 Unauthorized raises LLMConfigurationError without leaking secrets."""
+    secret_key = "super-secret-key-12345"
+    http_error = urllib.error.HTTPError(
+        url="https://api.openai.com/v1/chat/completions",
+        code=401,
+        msg="Unauthorized",
+        hdrs={},
+        fp=None,
+    )
+
+    with patch("urllib.request.urlopen", side_effect=http_error):
+        provider = OpenAICompatibleProvider(api_key=secret_key)
+        with pytest.raises(LLMConfigurationError) as exc_info:
+            analyze_article(sample_article, provider=provider)
+
+        # Confirm that API key is NEVER leaked in exception messages or logs
+        assert secret_key not in str(exc_info.value)
+        assert "Authentication failed" in str(exc_info.value)
+
+
+def test_openai_compatible_provider_http_429_rate_limit(sample_article):
+    """5. HTTP 429 Rate Limit raises LLMRateLimitError."""
+    http_error = urllib.error.HTTPError(
+        url="https://api.openai.com/v1/chat/completions",
+        code=429,
+        msg="Too Many Requests",
+        hdrs={},
+        fp=None,
+    )
+
+    with patch("urllib.request.urlopen", side_effect=http_error):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMRateLimitError, match="rate limit or quota exceeded"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_openai_compatible_provider_http_503_server_error(sample_article):
+    """6. HTTP 503 Server Error raises LLMProviderUnavailableError."""
+    http_error = urllib.error.HTTPError(
+        url="https://api.openai.com/v1/chat/completions",
+        code=503,
+        msg="Service Unavailable",
+        hdrs={},
+        fp=None,
+    )
+
+    with patch("urllib.request.urlopen", side_effect=http_error):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMProviderUnavailableError, match="service temporarily unavailable"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_openai_compatible_provider_timeout(sample_article):
+    """7. Network timeout raises LLMTimeoutError."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("Request timed out after 30.0s")):
+        provider = OpenAICompatibleProvider(api_key="test-key", timeout=30.0)
+        with pytest.raises(LLMTimeoutError, match="timed out"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_provider_factory_selection():
+    """8. Provider factory correctly instantiates mock, openai, and openrouter providers."""
+    # Mock provider
+    p_mock = get_llm_provider("mock")
+    assert p_mock.name == "mock"
+    assert isinstance(p_mock, MockLLMProvider)
+
+    # OpenAI provider
+    p_openai = get_llm_provider("openai", api_key="sk-test", model="gpt-4o")
+    assert p_openai.name == "openai"
+    assert isinstance(p_openai, OpenAICompatibleProvider)
+    assert p_openai.model == "gpt-4o"
+    assert p_openai.base_url == "https://api.openai.com/v1"
+
+    # OpenRouter provider
+    p_openrouter = get_llm_provider("openrouter", api_key="sk-test")
+    assert p_openrouter.name == "openrouter"
+    assert isinstance(p_openrouter, OpenAICompatibleProvider)
+    assert "openrouter.ai" in p_openrouter.base_url
+
+
+def test_openai_compatible_provider_empty_api_key():
+    """9. Empty API key during direct initialization raises LLMConfigurationError."""
+    with pytest.raises(LLMConfigurationError, match="LLM_API_KEY is required"):
+        OpenAICompatibleProvider(api_key="")
+
+    with pytest.raises(LLMConfigurationError, match="LLM_API_KEY is required"):
+        OpenAICompatibleProvider(api_key="   ")
+
+
+def test_openai_compatible_provider_missing_choices_or_content(sample_article):
+    """10. Responses missing choices or message content raise LLMMalformedResponseError."""
+    # Missing choices
+    resp_no_choices = json.dumps({"id": "chatcmpl-123"}).encode("utf-8")
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = resp_no_choices
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMMalformedResponseError, match="missing 'choices' array"):
+            analyze_article(sample_article, provider=provider)
+
+    # Missing message content
+    resp_no_content = json.dumps({"choices": [{"message": {}}]}).encode("utf-8")
+    mock_resp2 = MagicMock()
+    mock_resp2.read.return_value = resp_no_content
+    mock_resp2.__enter__.return_value = mock_resp2
+
+    with patch("urllib.request.urlopen", return_value=mock_resp2):
+        provider = OpenAICompatibleProvider(api_key="test-key")
+        with pytest.raises(LLMMalformedResponseError, match="missing message content"):
+            analyze_article(sample_article, provider=provider)
+

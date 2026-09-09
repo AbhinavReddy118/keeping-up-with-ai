@@ -16,5 +16,6 @@ DATABASE_PATH = DATA_DIR / "news_digest.db"
 
 # LLM Configuration (defaults to mock provider for safe offline operation)
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mock")
-LLM_MODEL = os.getenv("LLM_MODEL", "mock-model")
+LLM_MODEL = os.getenv("LLM_MODEL", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")

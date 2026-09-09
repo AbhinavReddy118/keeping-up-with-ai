@@ -14,7 +14,7 @@ from llm.exceptions import (
     LLMSchemaValidationError,
 )
 from llm.prompts import ANALYSIS_PROMPT_VERSION, SYSTEM_PROMPT, build_analysis_prompt
-from llm.provider import LLMProvider, MockLLMProvider, get_llm_provider
+from llm.provider import LLMProvider, MockLLMProvider, OpenAICompatibleProvider, get_llm_provider
 from llm.analyzer import prepare_article_input, analyze_article
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "build_analysis_prompt",
     "LLMProvider",
     "MockLLMProvider",
+    "OpenAICompatibleProvider",
     "get_llm_provider",
     "prepare_article_input",
     "analyze_article",
