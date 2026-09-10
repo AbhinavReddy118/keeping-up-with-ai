@@ -144,6 +144,66 @@ python3 demo_batch_analysis.py --mock --limit 5
 python3 demo_batch_analysis.py --limit 10
 ```
 
-All demonstration scripts verify that the SQLite database `articles` table count before and after execution is identical (100% read-only).
+---
+
+## Deterministic Article Ranking (Task 3.0)
+
+The system includes a deterministic article ranking engine in `ranking/` that dynamically evaluates articles joined with completed `article_analysis` records without persisting dynamic scores to the database.
+
+### Ranking Architecture
+
+```text
+    articles JOIN article_analysis (WHERE status = 'completed')
+                              │
+                              ▼
+                   [Component Scoring]
+         ┌─────────────┬─────────────┬─────────────┐
+         ▼             ▼             ▼             ▼
+     Relevance      Novelty       Recency     Confidence
+       (40%)         (25%)         (20%)         (15%)
+         │             │             │             │
+         └─────────────┼─────────────┴─────────────┘
+                       ▼
+                 [Final Score]  (Bounded between 0.0 and 1.0)
+                       │
+                       ▼
+             [Deterministic Sorting]
+          1. final_score DESC
+          2. published_at DESC (tie-breaker)
+          3. article_id ASC (tie-breaker)
+```
+
+### Scoring Formula & Weights
+
+The final score is computed as a weighted linear combination:
+
+$$\text{Final Score} = (0.40 \times \text{Relevance}) + (0.25 \times \text{Novelty}) + (0.20 \times \text{Recency}) + (0.15 \times \text{Confidence})$$
+
+* **Novelty Mapping**:
+  * `breakthrough`: `1.0`
+  * `significant`: `0.7`
+  * `incremental`: `0.4`
+  * `unknown`: `0.1`
+* **Recency Half-Life Decay**:
+  * Exponential decay formula: $\text{Recency} = 2^{-\Delta t / t_{\text{half}}}$ where $t_{\text{half}} = 7.0\text{ days}$.
+  * Handles missing/unparseable dates with a safe default (`0.20`).
+  * Clamps future timestamps to $\Delta t \ge 0$ (score $\le 1.0$).
+* **Event Type**: Handled conservatively with default weight 0.0%, preserving strict normalization to 1.0.
+
+### Running the Ranking Demonstration
+
+```bash
+python3 demo_ranking.py --limit 10
+```
+
+* Dynamically retrieves completed records via SQL JOIN.
+* Computes component breakdown and final scores.
+* Strictly read-only: verifies the SQLite `articles` table is never modified.
+
+### Known Limitations
+
+* **Linear Static Weighting**: Weights are fixed across sources and domains rather than learned.
+* **Cold Starts**: Articles that have not yet undergone LLM analysis (`status != 'completed'`) are excluded from ranking until batch analysis runs.
+
 
 
