@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}About - AI News Dashboard{% endblock %}
+
+{% block content %}
+
+<div class="detail-container">
+  
+  <div class="article-header-card">
+    <h1 class="detail-title">About AI News Dashboard</h1>
+    <p class="summary-text">
+      A personal AI intelligence monitor that continuously tracks, normalizes, deduplicates, analyzes, and ranks developments across the global AI ecosystem.
+    </p>
+  </div>
+
+  <div class="detail-content-card">
+    <h2 class="section-heading">Pipeline Architecture</h2>
+    
+    <div style="background: #0f172a; color: #e2e8f0; padding: 20px; border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.6; margin: 16px 0; overflow-x: auto;">
+RSS / Atom Sources
+    &darr;
+Generic Ingestion Reader
+    &darr;
+Schema Normalization
+    &darr;
+SQLite Article Storage ({{ stats.total_articles }} articles)
+    &darr;
+Progressive Deduplication
+    &darr;
+Batch LLM Structured Extraction ({{ stats.analyzed_articles }} analyzed)
+    &darr;
+Deterministic Ranking Engine
+    &darr;
+Minimal Web Interface (Flask + Jinja)
+    </div>
+
+    <h3 style="font-size: 15px; font-weight: 700; margin-top: 20px; margin-bottom: 8px;">Key Guarantees:</h3>
+    <ul class="key-points-list">
+      <li><strong>100% Read-Only Presentation:</strong> Web requests never modify or mutate database records.</li>
+      <li><strong>Structured Intelligence:</strong> LLM analysis extracts validated JSON schemas covering relevance, novelty, event classification, and named entities.</li>
+      <li><strong>Deterministic Ranking:</strong> Articles are scored dynamically using a normalized weighted formula (40% relevance, 25% novelty, 20% recency, 15% confidence).</li>
+      <li><strong>Inclusive Latest Feed:</strong> The latest news section presents ingested developments immediately, clearly designating whether LLM analysis has been completed.</li>
+    </ul>
+
+    <div style="margin-top: 24px;">
+      <a href="{{ url_for('index') }}" class="btn-original-link">&larr; Return to Dashboard</a>
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

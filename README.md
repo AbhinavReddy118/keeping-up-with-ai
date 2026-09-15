@@ -205,5 +205,59 @@ python3 demo_ranking.py --limit 10
 * **Linear Static Weighting**: Weights are fixed across sources and domains rather than learned.
 * **Cold Starts**: Articles that have not yet undergone LLM analysis (`status != 'completed'`) are excluded from ranking until batch analysis runs.
 
+---
+
+## Web Interface (Task 3.1)
+
+An async, server-rendered web dashboard in `web/` built with **FastAPI + Jinja2 + Vanilla CSS** that provides an interactive, read-only presentation of ingested articles and intelligence rankings.
+
+### Architecture
+
+```text
+       SQLite Database (`articles` & `article_analysis`)
+                              │
+                              ▼
+        Read-Only Query Layer (`web/queries.py`)
+       (Joins, aggregations, pagination, ranking)
+                              │
+                              ▼
+            FastAPI Application (`web/app.py`)
+           (HTTP routes, error handlers, filters)
+                              │
+                              ▼
+            Jinja Templates + Vanilla CSS
+      (Dashboard, Article Detail, About, Responsive)
+```
+
+### Key Features & Design Reproduction
+* **Visual Fidelity**: Faithful reproduction of the reference intelligence dashboard with deep navy typography (`#0f172a`), soft slate background (`#f8fafc`), and solid blue accents (`#2563eb`).
+* **Summary Metrics**: 4 headline cards showing Total Articles, Analyzed & Ranked, Not Yet Analyzed, and Active Sources.
+* **Interactive Filtering**: Filter by Source and Event Type with URL query parameter persistence (`/?source=OpenAI&event_type=model_release`).
+* **Top Ranked AI News**: Displays top scored articles with amber score pills (`0.673`), styled thumbnails, metadata, and summaries.
+* **Latest AI News Feed**: Displays newly ingested developments sorted chronologically with distinct `Analyzed` vs. `Not analyzed` badges.
+* **Article Deep Dive**: Full article view (`/article/<id>`) displaying component scores breakdown, executive summary, key takeaways, and extracted entity tags.
+* **100% Read-Only Safety**: Browsing, filtering, and detail navigation never insert, mutate, or delete SQLite records.
+
+### Starting the Web Dashboard Locally
+
+```bash
+# Run using the Python module runner (uvicorn binds to 127.0.0.1:5000):
+python3 -m web.app
+
+# Or run directly with uvicorn:
+uvicorn web.app:app --host 127.0.0.1 --port 5000
+```
+Open **`http://127.0.0.1:5000`** in your browser.
+
+### Available Routes
+* `GET /`: Main dashboard with headline metrics, sidebar filters, top ranked news, and paginated latest news feed.
+* `GET /article/<article_id>`: Individual article detail page with full scoring breakdown and extracted intelligence.
+* `GET /about`: Architectural overview and pipeline status.
+
+### Known Limitations
+* **Server-Rendered Only**: Interactivity relies on native HTML forms and query strings rather than dynamic client-side SPA state.
+* **Synchronous Requests**: Page rendering fetches from local SQLite synchronously.
+
+
 
 

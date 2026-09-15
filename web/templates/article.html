@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.title }} - AI News Dashboard{% endblock %}
+
+{% block content %}
+
+<div class="detail-container">
+  
+  <!-- Back Navigation -->
+  <div class="back-nav">
+    <a href="{{ url_for('index') }}" class="back-link">
+      &larr; Back to Dashboard
+    </a>
+  </div>
+
+  <!-- Article Header Card -->
+  <div class="article-header-card">
+    <h1 class="detail-title">{{ article.title }}</h1>
+    
+    <div class="detail-meta-row">
+      <div><strong>Source:</strong> {{ article.source }}</div>
+      <div>&bull;</div>
+      <div><strong>Published:</strong> {{ article.published_at|format_date }}</div>
+      
+      {% if article.analysis_status == 'completed' and article.event_type %}
+        <div>&bull;</div>
+        <div>
+          <span class="badge blue">{{ article.event_type }}</span>
+        </div>
+      {% endif %}
+
+      <div>&bull;</div>
+      <div>
+        {% if article.analysis_status == 'completed' %}
+          <span class="status-pill analyzed">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            Analyzed
+          </span>
+        {% else %}
+          <span class="status-pill not-analyzed">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            Not analyzed
+          </span>
+        {% endif %}
+      {% if article.importance_stars %}
+        <div>&bull;</div>
+        <div class="detail-importance-inline">
+          <strong>Importance:</strong> <span class="stars-gold-detail">{{ article.importance_stars }}</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- Importance Highlight Banner (Requirement 4 & 9) -->
+    {% if article.importance_stars %}
+      <div class="detail-importance-banner">
+        <div class="importance-badge-large">
+          <span class="importance-title-text">Importance:</span>
+          <span class="importance-stars-display">{{ article.importance_stars }}</span>
+        </div>
+        <span class="importance-criteria-note">Ranked deterministically by relevance, novelty, and publication recency</span>
+      </div>
+    {% endif %}
+
+    {% if article.link %}
+      <div style="margin-top: 18px;">
+        <a href="{{ article.link }}" target="_blank" rel="noopener noreferrer" class="btn-original-link">
+          Read Original Article &rarr;
+        </a>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if article.analysis_status == 'completed' %}
+
+    <!-- About This Article (Requirement 5 & 6) -->
+    <div class="detail-content-card">
+      <h2 class="section-heading">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="16" x2="12" y2="12"/>
+          <line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        About This Article
+      </h2>
+      <p class="summary-text">{{ article.human_summary or article.analyzed_summary or article.raw_summary or "No summary available." }}</p>
+    </div>
+
+    <!-- Key Takeaways (Requirement 7 & 9) -->
+    {% if article.clean_key_takeaways and article.clean_key_takeaways|length > 0 %}
+      <div class="detail-content-card">
+        <h2 class="section-heading">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 11 12 14 22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+          Key Takeaways
+        </h2>
+        <ul class="key-points-list">
+          {% for pt in article.clean_key_takeaways %}
+            <li>{{ pt }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <!-- Topics & Extracted Entities (Requirement 9) -->
+    <div class="detail-content-card">
+      <h2 class="section-heading">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+          <polyline points="2 17 12 22 22 17"/>
+        </svg>
+        Key Topics & Entities
+      </h2>
+
+      <div class="entities-grid">
+        
+        <!-- Topics -->
+        {% if article.topics and article.topics|length > 0 %}
+          <div class="entity-group">
+            <div class="entity-label">Topics</div>
+            <div class="tags-cloud">
+              {% for item in article.topics %}
+                <span class="entity-chip topic">{{ item }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Technologies -->
+        {% if article.technologies and article.technologies|length > 0 %}
+          <div class="entity-group">
+            <div class="entity-label">Technologies</div>
+            <div class="tags-cloud">
+              {% for item in article.technologies %}
+                <span class="entity-chip tech">{{ item }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Companies -->
+        {% if article.companies and article.companies|length > 0 %}
+          <div class="entity-group">
+            <div class="entity-label">Companies</div>
+            <div class="tags-cloud">
+              {% for item in article.companies %}
+                <span class="entity-chip company">{{ item }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- People -->
+        {% if article.people and article.people|length > 0 %}
+          <div class="entity-group">
+            <div class="entity-label">People</div>
+            <div class="tags-cloud">
+              {% for item in article.people %}
+                <span class="entity-chip person">{{ item }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Models -->
+        {% if article.models and article.models|length > 0 %}
+          <div class="entity-group">
+            <div class="entity-label">Models</div>
+            <div class="tags-cloud">
+              {% for item in article.models %}
+                <span class="entity-chip model">{{ item }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Why It Matters / Novelty -->
+        {% if article.novelty and article.novelty != 'unknown' %}
+          <div class="entity-group">
+            <div class="entity-label">Why It Matters</div>
+            <div class="tags-cloud">
+              <span class="badge orange">Novelty: {{ article.novelty|capitalize }}</span>
+            </div>
+          </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+  {% else %}
+
+    <!-- Unanalyzed Notice Card -->
+    <div class="detail-content-card">
+      <div class="notice-box">
+        <strong>Analysis Pending</strong>
+        <p style="margin-top: 6px; line-height: 1.5;">
+          This article was ingested into the monitoring database but has not yet undergone structured LLM analysis.
+          You can read the original content via the link above or trigger batch processing to analyze remaining articles.
+        </p>
+      </div>
+
+      {% if article.raw_summary %}
+        <div style="margin-top: 20px;">
+          <h3 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">Raw Ingested Summary:</h3>
+          <p class="summary-text">{{ article.raw_summary }}</p>
+        </div>
+      {% endif %}
+    </div>
+
+  {% endif %}
+
+</div>
+
+{% endblock %}

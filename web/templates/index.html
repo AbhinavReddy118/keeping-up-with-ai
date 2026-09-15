@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block title %}AI News Dashboard - Real-time AI Intelligence{% endblock %}
+
+{% block content %}
+
+<!-- Summary Stat Cards -->
+<section class="summary-grid">
+  
+  <!-- Total Articles -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper blue">
+      <!-- Document icon -->
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <polyline points="10 9 9 9 8 9"/>
+      </svg>
+    </div>
+    <div>
+      <div class="stat-value">{{ stats.total_articles|format_number }}</div>
+      <div class="stat-label">Total Articles</div>
+    </div>
+  </div>
+
+  <!-- Analyzed & Ranked -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper green">
+      <!-- Checkmark circle icon -->
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+    </div>
+    <div>
+      <div class="stat-value green">{{ stats.analyzed_articles|format_number }}</div>
+      <div class="stat-label">Analyzed</div>
+    </div>
+  </div>
+
+  <!-- Not Yet Analyzed -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper orange">
+      <!-- Clock icon -->
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </div>
+    <div>
+      <div class="stat-value orange">{{ stats.not_yet_analyzed|format_number }}</div>
+      <div class="stat-label">Not Yet Analyzed</div>
+    </div>
+  </div>
+
+  <!-- Sources -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper slate">
+      <!-- Database / Cylinder icon -->
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3"/>
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="stat-value">{{ stats.distinct_sources }}</div>
+      <div class="stat-label">Sources</div>
+    </div>
+  </div>
+
+</section>
+
+<!-- Dashboard Main Grid: Sidebar + Content -->
+<div class="dashboard-grid">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- Filters Card -->
+    <div class="sidebar-card">
+      <div class="sidebar-card-header">
+        <!-- Funnel filter icon -->
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+        </svg>
+        <span>Filters</span>
+      </div>
+
+      <form method="GET" action="{{ url_for('index') }}">
+        
+        <!-- Source Filter -->
+        <div class="filter-group">
+          <label class="filter-label" for="source-select">Source</label>
+          <select id="source-select" name="source" class="filter-select">
+            <option value="">All Sources</option>
+            {% for src in sources %}
+              <option value="{{ src }}" {% if selected_source == src %}selected{% endif %}>{{ src }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Event Type Filter -->
+        <div class="filter-group">
+          <label class="filter-label" for="event-select">Event Type</label>
+          <select id="event-select" name="event_type" class="filter-select">
+            <option value="">All Event Types</option>
+            {% for et in event_types %}
+              <option value="{{ et.key }}" {% if selected_event_type == et.key %}selected{% endif %}>{{ et.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Action Buttons -->
+        <button type="submit" class="btn-apply">Apply Filters</button>
+        <a href="{{ url_for('index') }}" class="btn-clear">Clear Filters</a>
+
+      </form>
+    </div>
+
+    <!-- Event Types Breakdown Card -->
+    <div class="sidebar-card">
+      <div class="sidebar-card-header">
+        <!-- Layers / category icon -->
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+          <polyline points="2 17 12 22 22 17"/>
+          <polyline points="2 12 12 17 22 12"/>
+        </svg>
+        <span>Event Types</span>
+      </div>
+
+      <ul class="event-type-list">
+        {% for cat in event_types %}
+          <li>
+            <a href="{{ url_for('index', event_type=cat.key, source=selected_source) }}" class="event-type-item">
+              <div class="event-type-left">
+                <span class="event-dot" style="background-color: {{ cat.color }};"></span>
+                <span class="event-type-name">{{ cat.label }}</span>
+              </div>
+              <span class="event-type-count">{{ cat.count }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+  </aside>
+
+  <!-- RIGHT MAIN CONTENT -->
+  <div class="content-column">
+
+    <!-- Hot Topics Section (Requirement 2 & 8) -->
+    <section class="content-card">
+      
+      <div class="card-header-bar">
+        <div class="card-header-left">
+          <!-- Flame / Hot Topic icon -->
+          <div class="header-icon gold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 3z"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="card-title">Hot Topics</h2>
+            <p class="card-subtitle">Important AI developments ranked by relevance, novelty and recency</p>
+          </div>
+        </div>
+        <a href="{{ url_for('index') }}" class="view-all-link">
+          View all <span>&rarr;</span>
+        </a>
+      </div>
+
+      <div class="ranked-items-list">
+        {% if ranked_articles %}
+          {% for item in ranked_articles %}
+            <a href="{{ url_for('article_detail', article_id=item.article_id) }}" class="ranked-item-row">
+              
+              <!-- 5-Star Importance Indicator (Requirement 4) -->
+              <div class="importance-stars-pill" title="Importance: {{ item.importance_stars }}">
+                <span class="stars-visual">{{ item.importance_stars }}</span>
+                <span class="stars-label">Importance</span>
+              </div>
+
+              <!-- Article Thumbnail -->
+              <div class="rank-thumbnail">
+                <!-- Tech / Code / Article Icon -->
+                {% if 'Claude' in item.title or 'Hacker News' in item.source %}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="16 18 22 12 16 6"/>
+                    <polyline points="8 6 2 12 8 18"/>
+                  </svg>
+                {% elif 'Paper' in item.title or item.event_type == 'research_paper' %}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                  </svg>
+                {% else %}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="2" y1="12" x2="22" y2="12"/>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                {% endif %}
+              </div>
+
+              <!-- Item Content -->
+              <div class="ranked-item-content">
+                <div class="ranked-item-title">{{ item.title }}</div>
+                
+                <div class="ranked-item-meta">
+                  <span>{{ item.source }}</span>
+                  <span>&bull;</span>
+                  <span>{{ item.published_at|format_date }}</span>
+                  
+                  {% if item.event_type %}
+                    <span>&bull;</span>
+                    {% if item.event_type in ['model_release'] %}
+                      <span class="badge green">{{ item.event_type }}</span>
+                    {% elif item.event_type in ['research_paper'] %}
+                      <span class="badge blue">{{ item.event_type }}</span>
+                    {% elif item.event_type in ['tool_release'] %}
+                      <span class="badge red">{{ item.event_type }}</span>
+                    {% elif item.event_type in ['industry_news'] %}
+                      <span class="badge orange">{{ item.event_type }}</span>
+                    {% else %}
+                      <span class="badge grey">{{ item.event_type }}</span>
+                    {% endif %}
+                  {% endif %}
+                </div>
+
+                <div class="ranked-item-summary">
+                  {{ item.summary or "Read the full article overview and key takeaways in the details view." }}
+                </div>
+              </div>
+
+              <!-- Right Chevron -->
+              <div class="row-chevron">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </div>
+
+            </a>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state">
+            <p class="empty-state-title">No ranked articles match these filters.</p>
+            <p class="empty-state-desc">Try clearing the filters or running batch analysis to analyze more articles.</p>
+          </div>
+        {% endif %}
+      </div>
+
+    </section>
+
+    <!-- Latest AI News Section (Includes unanalyzed raw articles) -->
+    <section class="content-card">
+      
+      <div class="card-header-bar">
+        <div class="card-header-left">
+          <!-- Clock icon -->
+          <div class="header-icon orange">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="card-title">Latest AI News</h2>
+            <p class="card-subtitle">Most recent articles (includes unanalyzed articles)</p>
+          </div>
+        </div>
+        <a href="{{ url_for('index', page=1) }}" class="view-all-link">
+          View all <span>&rarr;</span>
+        </a>
+      </div>
+
+      <div class="latest-items-list">
+        {% if latest_articles %}
+          {% for item in latest_articles %}
+            <a href="{{ url_for('article_detail', article_id=item.id) }}" class="latest-item-row">
+              
+              <div class="latest-left">
+                <!-- Source Logo / Brand Icon -->
+                <div class="source-icon-badge" title="{{ item.source }}">
+                  {% if 'OpenAI' in item.source %}
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M22.28 9.8a6.97 6.97 0 0 0-.57-4.14 7.08 7.08 0 0 0-3.7-3.4 7.03 7.03 0 0 0-5.32-.22 7.07 7.07 0 0 0-4.1 3.22 7.02 7.02 0 0 0-2.4 2.55 7.1 7.1 0 0 0-.82 5.12 7.08 7.08 0 0 0 .57 4.14 7.03 7.03 0 0 0 3.7 3.4 7.07 7.07 0 0 0 5.32.22 7.02 7.02 0 0 0 4.1-3.22 7.08 7.08 0 0 0 2.4-2.55 7.1 7.1 0 0 0 .82-5.12z"/>
+                    </svg>
+                  {% elif 'Hugging' in item.source %}
+                    🤗
+                  {% elif 'Google' in item.source or 'DeepMind' in item.source %}
+                    <span style="color: #4285F4; font-weight: 800;">G</span>
+                  {% elif 'Microsoft' in item.source %}
+                    <span style="color: #00A4EF; font-weight: 800;">M</span>
+                  {% elif 'Hacker' in item.source %}
+                    <span style="color: #ff6600; font-weight: 800;">Y</span>
+                  {% elif 'arXiv' in item.source %}
+                    <span style="color: #b31b1b; font-weight: 800;">&chi;</span>
+                  {% else %}
+                    <span style="color: #ffffff; font-weight: 700;">{{ item.source[:2]|upper }}</span>
+                  {% endif %}
+                </div>
+
+                <div class="latest-text-col">
+                  <div class="latest-item-title">{{ item.title }}</div>
+                  <div class="latest-item-meta">
+                    <span>{{ item.source }}</span>
+                    <span>&bull;</span>
+                    <span>{{ item.published_at|format_date }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="latest-right">
+                <!-- Status Pill -->
+                {% if item.status == 'completed' %}
+                  <span class="status-pill analyzed">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                      <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    Analyzed
+                  </span>
+                {% else %}
+                  <span class="status-pill not-analyzed">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"/>
+                      <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    Not analyzed
+                  </span>
+                {% endif %}
+
+                <!-- Chevron -->
+                <div class="row-chevron">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
+                </div>
+              </div>
+
+            </a>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state">
+            <p class="empty-state-title">No latest articles found.</p>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Pagination Navigation -->
+      {% if pagination and pagination.total_pages > 1 %}
+        <div class="pagination-wrapper">
+          <div>
+            Showing Page <strong>{{ pagination.page }}</strong> of <strong>{{ pagination.total_pages }}</strong> ({{ pagination.total_count }} total)
+          </div>
+          <div class="pagination-controls">
+            {% if pagination.has_prev %}
+              <a href="{{ url_for('index', page=pagination.page - 1, source=selected_source, event_type=selected_event_type) }}" class="btn-page">&larr; Previous</a>
+            {% else %}
+              <span class="btn-page disabled">&larr; Previous</span>
+            {% endif %}
+
+            {% if pagination.has_next %}
+              <a href="{{ url_for('index', page=pagination.page + 1, source=selected_source, event_type=selected_event_type) }}" class="btn-page">Next &rarr;</a>
+            {% else %}
+              <span class="btn-page disabled">Next &rarr;</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+    </section>
+
+  </div>
+
+</div>
+
+{% endblock %}
