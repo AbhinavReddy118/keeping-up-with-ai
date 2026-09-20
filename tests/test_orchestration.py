@@ -216,3 +216,79 @@ def test_run_full_pipeline_empty_sources(temp_db):
     )
     assert result["ingestion"]["total_sources"] == 0
     assert result["ingestion"]["total_inserted"] == 0
+
+
+# ---------- Personalization layer (re-rank by topic weight nudge) ----------
+
+from orchestration import _load_topic_weights, apply_personalization
+
+
+def test_load_topic_weights_from_env(monkeypatch):
+    monkeypatch.setenv("TOPIC_WEIGHTS", "agent:1.5,reasoning:1.3,tool:1.0")
+    weights = _load_topic_weights()
+    assert weights == {"agent": 1.5, "reasoning": 1.3, "tool": 1.0}
+
+
+def test_load_topic_weights_empty(monkeypatch):
+    monkeypatch.delenv("TOPIC_WEIGHTS", raising=False)
+    assert _load_topic_weights() == {}
+    monkeypatch.setenv("TOPIC_WEIGHTS", "  ,  ")
+    assert _load_topic_weights() == {}
+
+
+def test_load_topic_weights_garbage_safe(monkeypatch):
+    monkeypatch.setenv("TOPIC_WEIGHTS", "agent:not-a-number,tool:1.2,broken:2.0")
+    weights = _load_topic_weights()
+    assert "agent" not in weights
+    assert weights["tool"] == 1.2
+    assert "broken" in weights  # 2.0 is numeric; garbage only filters true junk
+
+
+def test_apply_personalization_bonus_boosts_matching_articles():
+    articles = [
+        {
+            "article_id": 1,
+            "title": "An agent learns to use the browser",
+            "summary": "Paper about autonomous computer-use agents.",
+            "final_score": 0.50,
+            "published_at": "2026-09-20T10:00:00Z",
+        },
+        {
+            "article_id": 2,
+            "title": "A new transformer benchmark",
+            "summary": "We compare models on QA tasks.",
+            "final_score": 0.50,
+            "published_at": "2026-09-20T11:00:00Z",
+        },
+    ]
+    out = apply_personalization(articles, {"agent": 1.5}, bonus_cap=0.20)
+    # article 1 contains 'agent' => boosted
+    assert out[0]["article_id"] == 1
+    assert out[0]["_personalization_bonus"] > 0
+    assert out[0]["final_score"] > 0.50
+    # article 2 contains no agent-related keyword => no bonus
+    assert out[1]["_personalization_bonus"] == 0
+
+
+def test_apply_personalization_caps_bonus():
+    articles = [
+        {
+            "article_id": 1,
+            "title": "agent reasoning tool agent reasoning tool",
+            "summary": "agent agent agent reasoning reasoning",
+            "final_score": 0.30,
+            "published_at": "2026-09-20T10:00:00Z",
+        }
+    ]
+    out = apply_personalization(articles, {"agent": 5.0, "reasoning": 5.0}, bonus_cap=0.20)
+    # Bonus capped at 0.20
+    assert out[0]["_personalization_bonus"] == pytest.approx(0.20)
+    assert out[0]["final_score"] == pytest.approx(0.50)
+
+
+def test_apply_personalization_no_weights_passthrough():
+    articles = [{"article_id": 1, "title": "x", "summary": "y", "final_score": 0.5}]
+    out = apply_personalization(articles, {})
+    assert out == articles
+    out2 = apply_personalization(articles, None)
+    assert out2 == articles
