@@ -69,7 +69,40 @@ The system continuously:
 
 ---
 
-## LLM Analysis Foundation, Live Integration & Batch Persistence (Tasks 2.9.1, 2.9.2, 2.9.3)
+## Quick Start
+
+Run the complete end-to-end pipeline (ingestion → deduplication → analysis → ranking → delivery):
+
+```bash
+# Single run (uses configured LLM provider from .env)
+python3 main.py
+
+# Run continuously every 60 seconds
+python3 main.py --interval 60
+
+# Skip specific stages
+python3 main.py --no-dedup --no-delivery
+python3 main.py --batch-size 20 --rank-limit 5
+
+# JSON output for scripting
+python3 main.py --output json
+```
+
+### Telegram Configuration
+
+Set these environment variables in `.env` to enable Telegram delivery:
+
+| Variable | Description | Default |
+|---|---|---|
+| `TELEGRAM_ENABLED` | Enable Telegram delivery (`true`/`false`) | `false` |
+| `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) | `""` |
+| `TELEGRAM_CHAT_ID` | Target chat or channel ID | `""` |
+| `TELEGRAM_MIN_SCORE` | Minimum final score to deliver (0.0–1.0) | `0.0` |
+| `TELEGRAM_LIMIT` | Maximum articles per delivery | `5` |
+
+---
+
+
 
 The system includes a provider-independent structured extraction engine in `llm/`:
 
@@ -258,6 +291,71 @@ Open **`http://127.0.0.1:5000`** in your browser.
 * **Server-Rendered Only**: Interactivity relies on native HTML forms and query strings rather than dynamic client-side SPA state.
 * **Synchronous Requests**: Page rendering fetches from local SQLite synchronously.
 
+---
 
+## End-to-End Pipeline Orchestration
 
+The `orchestration.py` module chains all stages into a single command:
+
+```
+RSS Sources
+    ↓
+Ingestion (fetch, normalize, deduplicate, persist)
+    ↓
+LLM Batch Analysis (unanalyzed or failed articles)
+    ↓
+Deterministic Ranking (relevance, novelty, recency, confidence)
+    ↓
+Telegram Delivery (top-ranked stories above min-score threshold)
+```
+
+### Programmatic Usage
+
+```python
+from orchestration import run_full_pipeline
+from llm import MockLLMProvider
+
+result = run_full_pipeline(
+    deduplicate=True,
+    analyze=True,
+    analysis_limit=10,
+    provider=MockLLMProvider(),
+    rank=True,
+    rank_limit=10,
+    deliver=True,
+)
+
+print(result["ingestion"]["total_inserted"])
+print(result["analysis"]["completed"])
+print(result["ranking"]["count"])
+print(result["delivery"]["sent"])
+```
+
+### Deduplication (Task 2.10)
+
+The `deduplicate_articles()` function groups articles by:
+
+1. Exact URL match
+2. Normalized URL (strips tracking params, fragments, case)
+3. Content fingerprint (SHA-256 of normalized title + summary)
+4. Normalized title match
+5. Title similarity (SequenceMatcher ratio + token Jaccard with thresholds)
+
+One representative per group is persisted; duplicates are skipped from storage and downstream analysis.
+
+---
+
+## Running Tests
+
+```bash
+# Run all tests
+python3 -m pytest
+
+# Run specific test module
+python3 -m pytest tests/test_pipeline.py -v
+python3 -m pytest tests/test_delivery.py -v
+python3 -m pytest tests/test_orchestration.py -v
+```
+
+All tests run offline by default using `MockLLMProvider`. No network or API keys required for testing.
 

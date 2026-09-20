@@ -22,3 +22,15 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_BATCH_SIZE = int(os.getenv("LLM_BATCH_SIZE", "10"))
 LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
 
+# Telegram delivery configuration (disabled unless TELEGRAM_ENABLED is set)
+TELEGRAM_ENABLED = os.getenv("TELEGRAM_ENABLED", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_MIN_SCORE = float(os.getenv("TELEGRAM_MIN_SCORE", "0.0"))
+TELEGRAM_LIMIT = max(1, int(os.getenv("TELEGRAM_LIMIT", "5")))
+

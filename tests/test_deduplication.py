@@ -5,6 +5,7 @@ from deduplication import (
     content_fingerprint,
     calculate_title_similarity,
     analyze_duplicates,
+    deduplicate_articles,
 )
 
 
@@ -143,3 +144,76 @@ def test_analyze_duplicates_exact_and_cross_source():
         matched_ids.add(g["article_a"]["id"])
         matched_ids.add(g["article_b"]["id"])
     assert 5 not in matched_ids
+
+
+def test_deduplicate_articles_empty():
+    result = deduplicate_articles([])
+    assert result["articles"] == []
+    assert result["representative_for"] == []
+    assert result["duplicates"] == 0
+
+
+def test_deduplicate_articles_exact_title_match():
+    articles = [
+        {
+            "title": "OpenAI Releases GPT-6",
+            "link": "https://openai.com/news/gpt-6",
+            "summary": "Official announcement.",
+            "source": "OpenAI News",
+            "published_at": "2026-09-07T10:00:00Z",
+        },
+        {
+            "title": "OpenAI Releases GPT-6!",
+            "link": "https://news.ycombinator.com/item?id=12345",
+            "summary": "Hacker news thread.",
+            "source": "Hacker News AI",
+            "published_at": "2026-09-07T10:30:00Z",
+        },
+        {
+            "title": "Quantum Computing Breakthrough",
+            "link": "https://example.com/quantum",
+            "summary": "New quantum results.",
+            "source": "arXiv CS.AI Papers",
+            "published_at": "2026-09-06T12:00:00Z",
+        },
+    ]
+    result = deduplicate_articles(articles)
+    assert len(result["articles"]) == 2
+    assert result["duplicates"] == 1
+    assert len(result["representative_for"]) == 3
+    assert result["representative_for"][0] == result["representative_for"][1]
+    assert result["representative_for"][2] != result["representative_for"][0]
+
+
+def test_deduplicate_articles_normalized_url():
+    articles = [
+        {
+            "title": "Article A",
+            "link": "https://example.com/post?utm_source=twitter",
+            "summary": "Summary A",
+            "source": "Source X",
+            "published_at": "2026-09-01T10:00:00Z",
+        },
+        {
+            "title": "Article A (reposted)",
+            "link": "https://example.com/post?utm_medium=email",
+            "summary": "Summary A",
+            "source": "Source Y",
+            "published_at": "2026-09-01T11:00:00Z",
+        },
+    ]
+    result = deduplicate_articles(articles)
+    assert len(result["articles"]) == 1
+    assert result["duplicates"] == 1
+
+
+def test_deduplicate_articles_preserves_all_distinct():
+    articles = [
+        {"title": "Article One", "link": "https://a.com/1", "source": "S1", "published_at": "2026-09-01"},
+        {"title": "Article Two", "link": "https://b.com/2", "source": "S2", "published_at": "2026-09-02"},
+        {"title": "Article Three", "link": "https://c.com/3", "source": "S3", "published_at": "2026-09-03"},
+    ]
+    result = deduplicate_articles(articles)
+    assert len(result["articles"]) == 3
+    assert result["duplicates"] == 0
+

@@ -196,7 +196,92 @@ def generate_candidate_pairs(articles: list[dict]) -> set[tuple[int, int]]:
 # PROGRESSIVE DEDUPLICATION ANALYSIS
 # ==============================================================================
 
+
+def _deduplication_key(article: dict, kind: str) -> str:
+    link = article.get("link", "")
+    title = article.get("title", "")
+    summary = article.get("summary")
+    if kind == "url":
+        return link.strip()
+    if kind == "normalized_url":
+        return normalize_url(link)
+    if kind == "fingerprint":
+        return content_fingerprint(title, summary)
+    if kind == "title":
+        return normalize_title_for_dedup(title)
+    raise ValueError(f"Unknown deduplication key: {kind}")
+
+
+def deduplicate_articles(articles: list[dict]) -> dict:
+    """Return one representative per deduplication group and its mapping."""
+    count = len(articles)
+    if count == 0:
+        return {
+            "articles": [],
+            "representative_for": [],
+            "duplicates": 0,
+            "report": analyze_duplicates([]),
+        }
+
+    parent = list(range(count))
+
+    def find(item: int) -> int:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for kind in ("url", "normalized_url", "fingerprint", "title"):
+        groups = defaultdict(list)
+        for index, article in enumerate(articles):
+            key = _deduplication_key(article, kind)
+            if key:
+                groups[key].append(index)
+        for indexes in groups.values():
+            if len(indexes) > 1:
+                first = indexes[0]
+                for index in indexes[1:]:
+                    union(first, index)
+
+    for left, right in generate_candidate_pairs(articles):
+        similarity = calculate_title_similarity(
+            articles[left].get("title", ""), articles[right].get("title", "")
+        )
+        ratio = similarity["ratio"]
+        jaccard = similarity["jaccard"]
+        if ratio >= 0.85 or (ratio >= 0.78 and jaccard >= 0.65):
+            union(left, right)
+
+    representatives = {}
+    representative_for = []
+    first_original_for_root = {}
+
+    for original_index in range(count):
+        root = find(original_index)
+        if root not in representatives:
+            representatives[root] = len(representatives)
+            first_original_for_root[root] = original_index
+        representative_for.append(representatives[root])
+
+    unique_articles = [
+        articles[first_original_for_root[root]] for root in representatives
+    ]
+    return {
+        "articles": unique_articles,
+        "representative_for": representative_for,
+        "duplicates": count - len(unique_articles),
+        "report": analyze_duplicates(articles),
+    }
+
+
 def analyze_duplicates(articles: list[dict]) -> dict:
+
     """
     Run multi-stage deduplication analysis across an in-memory list of article dicts.
     """
