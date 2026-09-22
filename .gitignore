@@ -13,8 +13,9 @@ __pycache__/
 .venv/
 venv/
 
-# SQLite database
+# SQLite database and run logs
 data/*.db
+data/*.log
 
 # macOS
 .DS_Store

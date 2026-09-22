@@ -131,8 +131,15 @@ def deliver_ranked_articles(
 ) -> dict:
     """Deliver the highest-scoring articles and return per-message results."""
     if not config.enabled or not config.bot_token or not config.chat_id:
+        if not config.enabled:
+            reason = "Telegram disabled"
+        elif not config.bot_token:
+            reason = "missing TELEGRAM_BOT_TOKEN"
+        else:
+            reason = "missing TELEGRAM_CHAT_ID."
         return {
             "enabled": False,
+            "reason": f"Telegram not configured: {reason}",
             "sent": 0,
             "failed": 0,
             "skipped": max(0, len(ranked_articles) - config.limit),

@@ -392,3 +392,8 @@ def test_openai_compatible_provider_missing_choices_or_content(sample_article):
         with pytest.raises(LLMMalformedResponseError, match="missing message content"):
             analyze_article(sample_article, provider=provider)
 
+
+def test_openai_compatible_provider_invalid_model_name():
+    """11. Unverified OpenAI model names raise LLMConfigurationError clearly."""
+    with pytest.raises(LLMConfigurationError, match="Unsupported or unverified OpenAI model"):
+        OpenAICompatibleProvider(api_key="test-key", model="gpt-5.6-luna")

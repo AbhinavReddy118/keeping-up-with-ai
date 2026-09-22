@@ -138,15 +138,15 @@ class MockLLMProvider(LLMProvider):
         matched_signals = sum(1 for s in ai_signals if s in title_lower)
         relevance_score = min(1.0, max(0.6, 0.5 + (matched_signals * 0.1)))
 
-        summary_preview = summary_text[:150] if summary_text else request.title
-        clean_summary = f"Analysis of '{request.title}'. {summary_preview}"
+        summary_preview = summary_text.strip() if summary_text else request.title.strip()
+        clean_summary = summary_preview if summary_preview else f"Overview of {request.title}."
 
         mock_data = {
             "relevance_score": round(relevance_score, 2),
             "summary": clean_summary,
             "key_points": [
-                f"Article from {request.source} titled '{request.title}'.",
-                f"Primary topic identified as {topics[-1]}.",
+                f"Reports on developments regarding {request.title}.",
+                f"Covers key technical topics including {topics[-1]}.",
             ],
             "topics": topics,
             "technologies": technologies if technologies else ["Machine Learning"],
@@ -163,6 +163,31 @@ class MockLLMProvider(LLMProvider):
             prompt_version=request.prompt_version,
             raw_response=json.dumps(mock_data),
         )
+
+
+VALID_OPENAI_MODEL_PREFIXES = (
+    "gpt-4o",
+    "gpt-4-",
+    "gpt-4",
+    "gpt-3.5",
+    "o1-",
+    "o1",
+    "o3-",
+    "o3",
+    "chatgpt-4o",
+)
+
+
+def validate_model_identifier(provider_name: str, base_url: str, model: str) -> None:
+    """Validate model identifier against recognized provider model formats."""
+    clean_p = (provider_name or "").strip().lower()
+    clean_m = (model or "").strip().lower()
+    if clean_p == "openai" and "api.openai.com" in base_url:
+        if not any(clean_m == p or clean_m.startswith(p) for p in VALID_OPENAI_MODEL_PREFIXES):
+            raise LLMConfigurationError(
+                f"Unsupported or unverified OpenAI model: '{model}'. "
+                f"Expected standard OpenAI model such as 'gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', or 'o3-mini'."
+            )
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -187,6 +212,9 @@ class OpenAICompatibleProvider(LLMProvider):
         self.base_url = base_url.rstrip("/") if base_url else "https://api.openai.com/v1"
         self.timeout = float(timeout)
         self._provider_name = provider_name.strip().lower()
+
+        # Validate model identifier consistency (Step 5)
+        validate_model_identifier(self._provider_name, self.base_url, self.model)
 
     @property
     def name(self) -> str:

@@ -17,6 +17,7 @@ from ranking import (
     get_completed_articles_for_ranking,
     rank_articles,
 )
+from retention import prune_articles
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +129,13 @@ def run_full_pipeline(
     telegram_config: Optional[TelegramConfig] = None,
     db_path=None,
     topic_weights: Optional[dict[str, float]] = None,
+    retention_days: Optional[int] = None,
 ) -> dict:
     """
     Execute the complete intelligence pipeline.
 
     Stages:
+        0. Retention pruning (archive + delete articles older than RETENTION_DAYS)
         1. Ingestion (fetch, normalize, deduplicate, persist)
         2. LLM batch analysis of unanalyzed articles
         3. Deterministic ranking of completed analyses
@@ -140,7 +143,7 @@ def run_full_pipeline(
         5. Telegram delivery of top ranked stories
 
     Returns:
-        dict with keys ``ingestion``, ``analysis``, ``ranking``, ``delivery``.
+        dict with keys ``retention``, ``ingestion``, ``analysis``, ``ranking``, ``delivery``.
     """
     if topic_weights is None:
         topic_weights = _load_topic_weights()
@@ -151,6 +154,16 @@ def run_full_pipeline(
             "weights": dict(topic_weights),
         }
     }
+
+    retention_report = prune_articles(db_path=db_path, days=retention_days)
+    result["retention"] = retention_report
+    if retention_report.get("enabled"):
+        logger.info(
+            "Retention: archived %d, deleted %d (cutoff %s)",
+            retention_report["archived"],
+            retention_report["deleted"],
+            retention_report["cutoff"],
+        )
 
     ingestion_summary = run_pipeline(
         sources=sources,
@@ -167,25 +180,40 @@ def run_full_pipeline(
     )
 
     if analyze:
-        processor = BatchProcessor(
-            provider=provider,
-            batch_size=analysis_limit,
-            max_retries=max_retries,
-            db_path=db_path,
-        )
-        report = processor.run(limit=analysis_limit)
-        result["analysis"] = {
-            "total_attempted": report.total_attempted,
-            "completed": report.completed,
-            "failed": report.failed,
-            "retries_attempted": report.retries_attempted,
-        }
-        logger.info(
-            "Analysis complete: %d attempted, %d completed, %d failed",
-            report.total_attempted,
-            report.completed,
-            report.failed,
-        )
+        try:
+            processor = BatchProcessor(
+                provider=provider,
+                batch_size=analysis_limit,
+                max_retries=max_retries,
+                db_path=db_path,
+            )
+            report = processor.run(limit=analysis_limit)
+            result["analysis"] = {
+                "total_attempted": report.total_attempted,
+                "completed": report.completed,
+                "failed": report.failed,
+                "retries_attempted": report.retries_attempted,
+            }
+            logger.info(
+                "Analysis complete: %d attempted, %d completed, %d failed",
+                report.total_attempted,
+                report.completed,
+                report.failed,
+            )
+        except Exception as exc:
+            from llm.exceptions import LLMConfigurationError
+
+            if isinstance(exc, LLMConfigurationError):
+                logger.error("LLM configuration invalid: %s", exc)
+                result["analysis"] = {
+                    "error": str(exc),
+                    "total_attempted": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "retries_attempted": 0,
+                }
+            else:
+                raise
 
     ranked_articles = []
     if rank:

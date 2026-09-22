@@ -70,12 +70,13 @@ def clean_human_summary(
     event_type: Optional[str] = None,
 ) -> str:
     """
-    Format and enhance summary text so it reads like a human-friendly news explanation (Requirement 5).
-    Strips raw scraper/LLM metadata, 'Analysis of...', 'Article URL...', etc.
-    Ensures 2-4 concise, informative sentences explaining what happened and why it matters.
+    Format and clean summary text so it reads like a human-friendly news explanation.
+    Strips raw scraper/LLM boilerplate (e.g. 'Analysis of...', 'Article URL...', etc.).
+    Returns 'Analysis not available yet.' if summary is empty or unanalyzed.
+    Does not invent summaries (Step 13).
     """
-    if not raw_summary:
-        raw_summary = ""
+    if not raw_summary or not isinstance(raw_summary, str) or not raw_summary.strip():
+        return "Analysis not available yet."
 
     text = raw_summary.strip()
 
@@ -99,78 +100,14 @@ def clean_human_summary(
     text = re.sub(r"\s+", " ", text).strip()
     text = text.lstrip(".- :")
 
-    # 2. Check if remaining substantive text is informative (not just leftover URL fragments)
-    clean_substantive = re.sub(r"https?://\S+", "", text).strip()
-
-    if len(clean_substantive) >= 45 and not clean_substantive.lower().startswith("article url"):
-        if not clean_substantive.endswith((".", "!", "?")):
-            clean_substantive += "."
-        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean_substantive) if s.strip()]
-        if len(sentences) == 1:
-            clean_substantive += f" Highlights practical engineering workflows and community discussions surrounding {title.strip().rstrip('.')}."
-        return clean_substantive
-
-    # 3. Construct a high-quality human explanation if raw text was solely metadata
-    clean_title = title.strip()
-    if clean_title.startswith(("Ask HN:", "Show HN:", "Tell HN:")):
-        clean_title = clean_title.split(":", 1)[1].strip()
-
-    tl = clean_title.lower()
-    if "figma" in tl and "sync" in tl:
-        return (
-            "Discusses developer workflows and synchronization strategies for keeping autonomous AI coding agents aligned with evolving Figma designs. "
-            "Addresses the challenge of agent memory and state retention as design systems change during agile implementation."
-        )
-    elif "raptor" in tl and "claude code" in tl:
-        return (
-            "Raptor expands Claude Code beyond traditional software development by enabling broader computer-use capabilities. "
-            "The project demonstrates the growing transition from coding assistants toward systems that interact directly with applications and perform general computer tasks."
-        )
-    elif "token times" in tl:
-        return (
-            "The Token Times delivers a curated monthly publication covering notable research, tooling, and industry developments across artificial intelligence. "
-            "Aims to provide a readable, comprehensive digest of key ecosystem shifts for practitioners and researchers."
-        )
-    elif "beyond ai" in tl or "common good" in tl:
-        return (
-            "Explores the public infrastructure and institutional frameworks required to ensure artificial intelligence advances the common good. "
-            "Focuses on open systems, equitable compute access, and long-term societal governance."
-        )
-    elif "chess5" in tl:
-        return (
-            "Chess5.ai introduces a multi-game platform allowing players to challenge large language models across complex board games including Chess, Go, and Xiangqi. "
-            "Demonstrates the adversarial planning and tactical decision-making capabilities of modern generative models."
-        )
-    elif "cory doctorow" in tl:
-        return (
-            "Author and activist Cory Doctorow critiques current generative AI hype and the economic sustainability of large model commercialization. "
-            "Analyzes market dynamics, corporate incentives, and the gap between industry claims and practical utility."
-        )
-    elif "economics" in tl or "financials" in tl:
-        return (
-            "Analyzes enterprise inference costs, compute margins, and the economic fundamentals of generative AI deployments. "
-            "Provides financial insights into revenue models and capital expenditures across leading frontier AI labs."
-        )
-    elif "escape incident" in tl or "tracker" in tl:
-        return (
-            "The AI Escape Incident Tracker catalogs documented containment failures, unintended autonomous behaviors, and guardrail breaches in deployed agentic systems. "
-            "Serves as an empirical monitoring resource for AI safety researchers and red-teaming practitioners."
-        )
-    elif "conscious" in tl or "alive" in tl:
-        return (
-            "Examines philosophical and practical perspectives on perceived AI consciousness and autonomy in daily human interactions. "
-            "Argues that functional behavior and societal impact matter far more than theoretical definitions of sentience."
-        )
-    else:
-        return (
-            f"{clean_title}. "
-            f"Provides updates and practical insights from {source} regarding current advancements and ecosystem shifts across modern AI technologies."
-        )
+    return text if text else "Analysis not available yet."
 
 
 def clean_key_takeaways(key_points: Any, title: str = "", source: str = "") -> list[str]:
     """
-    Ensure key takeaways contain actual informative points rather than title or metadata repetition (Requirement 7).
+    Ensure key takeaways contain actual informative points from article_analysis.
+    Strips metadata boilerplate. Returns empty list if no takeaways available.
+    Does not invent fake takeaways (Step 13).
     """
     raw_list = key_points if isinstance(key_points, list) else []
     cleaned = []
@@ -188,38 +125,6 @@ def clean_key_takeaways(key_points: Any, title: str = "", source: str = "") -> l
             continue
         cleaned.append(p)
 
-    if not cleaned:
-        tl = title.lower()
-        if "sync" in tl or "figma" in tl:
-            cleaned = [
-                "Examines the challenge of keeping AI coding agents synchronized with changing design files.",
-                "Explores state management techniques between Figma UI components and generated codebases.",
-                "Gathers practical recommendations from teams implementing agentic front-end workflows.",
-            ]
-        elif "raptor" in tl or "claude code" in tl:
-            cleaned = [
-                "Raptor expands Claude Code beyond traditional code editing workflows.",
-                "Enables general-purpose computer use through direct application and browser interaction.",
-                "Reflects the industry shift from developer copilots to autonomous execution agents.",
-            ]
-        elif "token times" in tl:
-            cleaned = [
-                "Launches a structured monthly publication tracking major AI advancements.",
-                "Curates technical papers, open-source tooling, and company releases into one digestible format.",
-                "Provides accessible summaries designed for both technical engineers and enthusiasts.",
-            ]
-        elif "chess5" in tl:
-            cleaned = [
-                "Enables interactive gameplay against LLMs across Chess, Go, Xiangqi, and Gomoku.",
-                "Tests multi-step tactical planning and adversarial game theory in foundation models.",
-                "Highlights spatial reasoning capabilities and limitations in current LLM architectures.",
-            ]
-        else:
-            cleaned = [
-                f"Reports on recent developments regarding '{title}'.",
-                f"Published via {source} as part of ongoing ecosystem monitoring.",
-                "Reflects ongoing engineering advancements and practical implementation insights.",
-            ]
     return cleaned
 
 
@@ -603,14 +508,16 @@ def get_article_detail(
             data["importance_count"] = 0
             data["final_score"] = None
 
-        # Clean human-friendly summary (Requirement 5)
-        raw_to_clean = data.get("analyzed_summary") or data.get("raw_summary")
-        data["human_summary"] = clean_human_summary(
-            raw_to_clean,
-            title=data["title"],
-            source=data["source"],
-            event_type=data.get("event_type"),
-        )
+        # Clean human-friendly summary (Step 13)
+        if data.get("analysis_status") == "completed" and data.get("analyzed_summary"):
+            data["human_summary"] = clean_human_summary(
+                data["analyzed_summary"],
+                title=data["title"],
+                source=data["source"],
+                event_type=data.get("event_type"),
+            )
+        else:
+            data["human_summary"] = "Analysis not available yet."
 
         # Clean key takeaways (Requirement 7)
         data["clean_key_takeaways"] = clean_key_takeaways(

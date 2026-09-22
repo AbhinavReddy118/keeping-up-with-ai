@@ -345,16 +345,80 @@ One representative per group is persisted; duplicates are skipped from storage a
 
 ---
 
+## Rolling Retention Window
+
+The `retention.py` module archives and deletes articles older than `RETENTION_DAYS` (default 30). Run automatically at the start of every pipeline pass, or invoke directly:
+
+```python
+from retention import prune_articles, archive_stats
+
+result = prune_articles(days=30)
+# {"enabled": True, "archived": 12, "deleted": 12, "cutoff": "2025-08-21T..."}
+
+stats = archive_stats()
+# {"exists": True, "total": 847, "oldest": "...", "newest": "..."}
+```
+
+Set `RETENTION_DAYS=0` in `.env` to disable archival.
+
+Archive lives at `data/news_digest_archive.db` next to the main database.
+
+---
+
+## Personalization (Topic-Weight Re-ranking)
+
+Optional nudge after deterministic ranking. Set `TOPIC_WEIGHTS` in `.env`:
+
+```
+TOPIC_WEIGHTS=agent:1.5,reasoning:1.3,tool:1.2,safety:1.4
+```
+
+Articles whose title+summary contains a keyword get a bonus up to `+0.20` on the final score. Deterministic ranking itself is unchanged; only the delivery score is shifted. Original ranking in the web dashboard is unaffected.
+
+---
+
+## Scheduled Runs (macOS launchd)
+
+Install a daily 09:00 IST cron that runs the full pipeline and writes logs:
+
+```bash
+./scripts/install_cron.sh
+```
+
+This copies `scripts/com.ai-news-digest.daily.plist` to `~/Library/LaunchAgents/`, loads it via `launchctl`, and points `run_daily.sh` at the project root.
+
+Manual controls:
+
+```bash
+# Trigger a run now
+launchctl start com.ai-news-digest.daily
+
+# View recent runs
+ls -lt data/daily_*.log | head
+
+# Uninstall
+launchctl unload ~/Library/LaunchAgents/com.ai-news-digest.daily.plist
+rm ~/Library/LaunchAgents/com.ai-news-digest.daily.plist
+```
+
+The plist runs the pipeline with `TZ=Asia/Kolkata` so 09:00 local time fires correctly across DST changes.
+
+---
+
 ## Running Tests
 
 ```bash
-# Run all tests
-python3 -m pytest
+# Run all tests using virtual environment Python
+.venv/bin/python -m pytest
+
+# Or activate venv first:
+# source .venv/bin/activate && pytest
 
 # Run specific test module
-python3 -m pytest tests/test_pipeline.py -v
-python3 -m pytest tests/test_delivery.py -v
-python3 -m pytest tests/test_orchestration.py -v
+.venv/bin/python -m pytest tests/test_pipeline.py -v
+.venv/bin/python -m pytest tests/test_delivery.py -v
+.venv/bin/python -m pytest tests/test_orchestration.py -v
+.venv/bin/python -m pytest tests/test_retention.py -v
 ```
 
 All tests run offline by default using `MockLLMProvider`. No network or API keys required for testing.

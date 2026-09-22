@@ -95,9 +95,12 @@ def format_summary(result: dict) -> str:
     if analysis is not None:
         lines.append("")
         lines.append("ANALYSIS")
-        lines.append(f"  Attempted: {analysis.get('total_attempted', 0)}")
-        lines.append(f"  Completed: {analysis.get('completed', 0)}")
-        lines.append(f"  Failed: {analysis.get('failed', 0)}")
+        if analysis.get("error"):
+            lines.append(f"  Status: Error ({analysis.get('error')})")
+        else:
+            lines.append(f"  Attempted: {analysis.get('total_attempted', 0)}")
+            lines.append(f"  Completed: {analysis.get('completed', 0)}")
+            lines.append(f"  Failed: {analysis.get('failed', 0)}")
 
     ranking = result.get("ranking")
     if ranking is not None:
@@ -113,7 +116,8 @@ def format_summary(result: dict) -> str:
             lines.append(f"  Sent: {delivery.get('sent', 0)}")
             lines.append(f"  Failed: {delivery.get('failed', 0)}")
         else:
-            lines.append("  Status: Skipped (not configured)")
+            reason = delivery.get("reason", "Telegram not configured")
+            lines.append(f"  Status: Skipped ({reason})")
 
     return "\n".join(lines)
 
