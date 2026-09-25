@@ -397,3 +397,184 @@ def test_openai_compatible_provider_invalid_model_name():
     """11. Unverified OpenAI model names raise LLMConfigurationError clearly."""
     with pytest.raises(LLMConfigurationError, match="Unsupported or unverified OpenAI model"):
         OpenAICompatibleProvider(api_key="test-key", model="gpt-5.6-luna")
+
+
+# ==============================================================================
+# OLLAMA LOCAL PROVIDER TESTS (TASK 1.3)
+# ==============================================================================
+
+def test_ollama_provider_selection_and_defaults():
+    """Ollama provider can be instantiated via factory with proper defaults."""
+    provider = get_llm_provider("ollama")
+    assert provider.name == "ollama"
+    assert provider.model == "qwen3:4b"
+    assert provider.base_url == "http://localhost:11434"
+
+    custom_provider = get_llm_provider(
+        "ollama",
+        model="custom-qwen",
+        base_url="http://127.0.0.1:11434",
+        timeout=45.0,
+    )
+    assert custom_provider.model == "custom-qwen"
+    assert custom_provider.base_url == "http://127.0.0.1:11434"
+    assert custom_provider.timeout == 45.0
+
+
+def test_ollama_provider_successful_analysis(sample_article, valid_llm_output_dict):
+    """Successful Ollama response returns validated AnalysisResult."""
+    ollama_envelope = {
+        "model": "qwen3:4b",
+        "message": {"role": "assistant", "content": json.dumps(valid_llm_output_dict)},
+        "done": True,
+    }
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(ollama_envelope).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp) as mock_urlopen:
+        provider = get_llm_provider("ollama")
+        result = analyze_article(sample_article, provider=provider)
+
+        assert isinstance(result, AnalysisResult)
+        assert result.relevance_score == 0.95
+        assert "GPT-4o" in result.models
+        assert "OpenAI" in result.companies
+        assert result.event_type == "model_release"
+        assert result.novelty == "breakthrough"
+
+        # Verify request URL and payload
+        args, kwargs = mock_urlopen.call_args
+        req = args[0]
+        assert req.full_url == "http://localhost:11434/api/chat"
+        payload = json.loads(req.data.decode("utf-8"))
+        assert payload["model"] == "qwen3:4b"
+        assert payload["format"] == "json"
+        assert payload["stream"] is False
+        assert payload["think"] is False
+
+
+def test_ollama_provider_handles_thinking_tags(sample_article, valid_llm_output_dict):
+    """Reasoning models outputting <think>...</think> before JSON are stripped cleanly."""
+    raw_with_think = f"<think>\nAnalyzing the input article...\n</think>\n{json.dumps(valid_llm_output_dict)}"
+    ollama_envelope = {
+        "model": "qwen3:4b",
+        "message": {"role": "assistant", "content": raw_with_think},
+        "done": True,
+    }
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(ollama_envelope).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = get_llm_provider("ollama")
+        result = analyze_article(sample_article, provider=provider)
+        assert isinstance(result, AnalysisResult)
+        assert result.relevance_score == 0.95
+
+
+def test_ollama_provider_malformed_envelope_response(sample_article):
+    """Non-JSON response from Ollama server raises LLMMalformedResponseError."""
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = b"<html>Server Error</html>"
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMMalformedResponseError, match="not valid JSON"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_ollama_provider_missing_content(sample_article):
+    """Ollama envelope missing content raises LLMMalformedResponseError."""
+    ollama_envelope = {"model": "qwen3:4b", "message": {}}
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(ollama_envelope).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMMalformedResponseError, match="missing message content"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_ollama_provider_invalid_json_model_output(sample_article):
+    """Model message content that is not valid JSON raises LLMMalformedResponseError."""
+    ollama_envelope = {
+        "model": "qwen3:4b",
+        "message": {"content": "I am unable to analyze this article."},
+    }
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(ollama_envelope).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMMalformedResponseError, match="Model output content is not valid JSON"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_ollama_provider_http_failure(sample_article):
+    """HTTP 404 or 500 errors from Ollama raise LLMProviderUnavailableError."""
+    # 404 Not Found (e.g. model not pulled)
+    err_404 = urllib.error.HTTPError(
+        url="http://localhost:11434/api/chat",
+        code=404,
+        msg="Not Found",
+        hdrs={},
+        fp=None,
+    )
+    with patch("urllib.request.urlopen", side_effect=err_404):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMProviderUnavailableError, match="404"):
+            analyze_article(sample_article, provider=provider)
+
+    # 503 Service Unavailable
+    err_503 = urllib.error.HTTPError(
+        url="http://localhost:11434/api/chat",
+        code=503,
+        msg="Service Unavailable",
+        hdrs={},
+        fp=None,
+    )
+    with patch("urllib.request.urlopen", side_effect=err_503):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMProviderUnavailableError, match="503"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_ollama_provider_timeout(sample_article):
+    """Network / socket timeout raises LLMTimeoutError."""
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("The read operation timed out")):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMTimeoutError, match="timed out"):
+            analyze_article(sample_article, provider=provider)
+
+
+def test_ollama_provider_schema_validation_failure(sample_article):
+    """JSON output that violates AnalysisResult schema raises LLMSchemaValidationError."""
+    invalid_schema_dict = {
+        "relevance_score": 2.5,  # Out of bounds (> 1.0)
+        "summary": "Summary text",
+        "key_points": ["point 1"],
+        "topics": [],
+        "technologies": [],
+        "companies": [],
+        "people": [],
+        "models": [],
+        "event_type": "invalid_event_type",
+        "novelty": "unknown",
+        "confidence": 0.9,
+    }
+    ollama_envelope = {
+        "model": "qwen3:4b",
+        "message": {"content": json.dumps(invalid_schema_dict)},
+    }
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps(ollama_envelope).encode("utf-8")
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        provider = get_llm_provider("ollama")
+        with pytest.raises(LLMSchemaValidationError):
+            analyze_article(sample_article, provider=provider)

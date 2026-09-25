@@ -12,7 +12,7 @@ from llm.exceptions import LLMError
 logger = logging.getLogger(__name__)
 
 
-def prepare_article_input(article: dict, max_summary_chars: int = 2000) -> AnalysisRequest:
+def prepare_article_input(article: dict, max_summary_chars: int = 4000) -> AnalysisRequest:
     """
     Sanitize and validate an article dictionary into a typed AnalysisRequest.
 

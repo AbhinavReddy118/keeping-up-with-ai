@@ -5,6 +5,7 @@ Provider abstraction and implementations for LLM article analysis.
 from abc import ABC, abstractmethod
 import json
 import logging
+import re
 import urllib.request
 import urllib.error
 from typing import Optional
@@ -334,6 +335,135 @@ class OpenAICompatibleProvider(LLMProvider):
         )
 
 
+class OllamaProvider(LLMProvider):
+    """
+    Local LLM provider using the Ollama HTTP API (Task 1.3).
+    Communicates with local Ollama daemon (e.g. running Qwen3 4B) over HTTP without paid API dependencies.
+    """
+
+    def __init__(
+        self,
+        model: str = "qwen3:4b",
+        base_url: str = "http://localhost:11434",
+        timeout: float = 180.0,
+        provider_name: str = "ollama",
+    ):
+        self.model = model.strip() if model and model.strip() else "qwen3:4b"
+        self.base_url = base_url.rstrip("/") if base_url else "http://localhost:11434"
+        self.timeout = float(timeout)
+        self._provider_name = provider_name.strip().lower()
+
+    @property
+    def name(self) -> str:
+        return self._provider_name
+
+    def analyze(self, request: AnalysisRequest) -> AnalysisResult:
+        """
+        Execute structured LLM analysis via Ollama /api/chat with format='json'.
+        """
+        user_prompt = build_analysis_prompt(
+            title=request.title,
+            source=request.source,
+            published_at=request.published_at,
+            summary=request.summary,
+        )
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "stream": False,
+            "format": "json",
+            "think": False,
+            "options": {
+                "temperature": request.temperature,
+                "num_predict": min(request.max_tokens or 800, 1000),
+            },
+        }
+
+        endpoint = f"{self.base_url}/api/chat"
+        payload_bytes = json.dumps(payload).encode("utf-8")
+
+        req = urllib.request.Request(
+            endpoint,
+            data=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "AI-News-Digest/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            logger.info(f"Sending LLM analysis request to {self.name} ({self.model})...")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                resp_bytes = resp.read()
+                resp_text = resp_bytes.decode("utf-8")
+
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                logger.error(f"Ollama model or endpoint not found (HTTP 404): {e.reason}")
+                raise LLMProviderUnavailableError(
+                    f"Ollama model '{self.model}' or endpoint '{endpoint}' not found (HTTP 404)."
+                ) from e
+            elif e.code in (500, 502, 503, 504):
+                logger.error(f"Ollama server error (HTTP {e.code}): {e.reason}")
+                raise LLMProviderUnavailableError(
+                    f"Ollama service temporarily unavailable (HTTP {e.code})."
+                ) from e
+            else:
+                logger.error(f"Ollama HTTP error {e.code}: {e.reason}")
+                raise LLMProviderUnavailableError(
+                    f"Ollama returned HTTP error {e.code}: {e.reason}"
+                ) from e
+
+        except (urllib.error.URLError, TimeoutError) as e:
+            err_str = str(e).lower()
+            if "timed out" in err_str or isinstance(e, TimeoutError):
+                logger.error(f"Ollama request timed out after {self.timeout}s.")
+                raise LLMTimeoutError(f"Request to Ollama API timed out after {self.timeout}s.") from e
+            else:
+                logger.error(f"Network error connecting to Ollama daemon at {self.base_url}: {e}")
+                raise LLMProviderUnavailableError(
+                    f"Could not connect to Ollama daemon at {self.base_url}: {getattr(e, 'reason', e)}"
+                ) from e
+
+        except Exception as e:
+            logger.error(f"Unexpected error communicating with Ollama: {e}")
+            raise LLMProviderUnavailableError(f"Unexpected error communicating with Ollama: {e}") from e
+
+        # Parse Ollama envelope JSON
+        try:
+            resp_json = json.loads(resp_text)
+        except json.JSONDecodeError as e:
+            raise LLMMalformedResponseError(f"Ollama response is not valid JSON: {e}") from e
+
+        message = resp_json.get("message", {})
+        raw_content = message.get("content")
+        if not raw_content or not isinstance(raw_content, str):
+            raise LLMMalformedResponseError("Ollama response missing message content.")
+
+        # Clean any thinking block (e.g. <think>...</think>) from reasoning models
+        cleaned_content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+
+        # Parse extracted JSON content
+        try:
+            parsed_analysis = json.loads(cleaned_content)
+        except json.JSONDecodeError as e:
+            raise LLMMalformedResponseError(
+                f"Model output content is not valid JSON: {cleaned_content[:200]}"
+            ) from e
+
+        # Validate through schema
+        return AnalysisResult.from_dict(
+            parsed_analysis,
+            prompt_version=request.prompt_version,
+            raw_response=raw_content,
+        )
+
+
 def get_llm_provider(
     provider_name: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -364,6 +494,31 @@ def get_llm_provider(
 
     if selected == "mock":
         return MockLLMProvider(**kwargs)
+
+    if selected == "ollama":
+        if model is not None:
+            resolved_model = model.strip()
+        elif LLM_PROVIDER == "ollama" and LLM_MODEL:
+            resolved_model = LLM_MODEL.strip()
+        else:
+            resolved_model = "qwen3:4b"
+
+        if base_url is not None:
+            resolved_base = base_url.strip()
+        elif LLM_PROVIDER == "ollama" and LLM_BASE_URL:
+            resolved_base = LLM_BASE_URL.strip()
+        else:
+            resolved_base = "http://localhost:11434"
+
+        # Allow generous timeout for local model inference if default 30s was passed
+        resolved_timeout = max(timeout, 180.0) if timeout == 30.0 else timeout
+
+        return OllamaProvider(
+            model=resolved_model,
+            base_url=resolved_base,
+            timeout=resolved_timeout,
+            provider_name=selected,
+        )
 
     if selected in {"openai", "openrouter", "openai_compatible"}:
         resolved_key = (api_key if api_key is not None else LLM_API_KEY or "").strip()
@@ -413,5 +568,5 @@ def get_llm_provider(
 
 
     raise LLMConfigurationError(
-        f"Unsupported LLM provider: '{selected}'. Supported providers for Task 2.9.2: 'mock', 'openai', 'openrouter'."
+        f"Unsupported LLM provider: '{selected}'. Supported providers: 'mock', 'ollama', 'openai', 'openrouter'."
     )

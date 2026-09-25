@@ -21,7 +21,7 @@ ARTICLE METADATA:
 - Title: {title}
 - Source: {source}
 - Published Date: {published_at}
-- Feed Summary: {summary}
+- Article Content / Summary: {summary}
 
 EXPECTED JSON SCHEMA:
 {{
