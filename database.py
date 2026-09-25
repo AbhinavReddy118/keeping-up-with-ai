@@ -21,9 +21,28 @@ def init_db(db_path=None):
                 source TEXT NOT NULL,
                 published_at TEXT,
                 raw_content TEXT,
+                content TEXT,
+                enrichment_status TEXT DEFAULT 'pending',
+                enrichment_error TEXT,
+                enriched_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Migration: Ensure enrichment columns exist if upgrading an existing database
+        cursor.execute("PRAGMA table_info(articles)")
+        existing_cols = {row["name"] for row in cursor.fetchall()}
+        migration_cols = [
+            ("content", "TEXT"),
+            ("enrichment_status", "TEXT DEFAULT 'pending'"),
+            ("enrichment_error", "TEXT"),
+            ("enriched_at", "TIMESTAMP"),
+        ]
+        for col_name, col_def in migration_cols:
+            if col_name not in existing_cols:
+                cursor.execute(f"ALTER TABLE articles ADD COLUMN {col_name} {col_def}")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_enrichment_status ON articles(enrichment_status)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS article_analysis (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

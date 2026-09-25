@@ -38,13 +38,16 @@ def prepare_article_input(article: dict, max_summary_chars: int = 2000) -> Analy
         raise ValueError("Article missing required 'source'.")
 
     link = article.get("link", "")
+    content = article.get("content")
     summary = article.get("summary")
-    if summary and isinstance(summary, str):
-        summary = summary.strip()
-        if len(summary) > max_summary_chars:
-            summary = summary[:max_summary_chars] + "... [truncated]"
+    # Prefer enriched article content over RSS summary if available
+    text_payload = content if (content and isinstance(content, str) and content.strip()) else summary
+    if text_payload and isinstance(text_payload, str):
+        text_payload = text_payload.strip()
+        if len(text_payload) > max_summary_chars:
+            text_payload = text_payload[:max_summary_chars] + "... [truncated]"
     else:
-        summary = None
+        text_payload = None
 
     published_at = article.get("published_at")
     article_id = article.get("id")
@@ -54,7 +57,7 @@ def prepare_article_input(article: dict, max_summary_chars: int = 2000) -> Analy
         title=title.strip(),
         link=link.strip() if isinstance(link, str) else "",
         source=source.strip(),
-        summary=summary,
+        summary=text_payload,
         published_at=published_at,
     )
 

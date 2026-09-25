@@ -118,7 +118,7 @@ def get_article_by_link(link: str, conn: sqlite3.Connection = None) -> dict | No
     Returns:
         dict representation of the database record or None if not found.
     """
-    query = "SELECT id, title, link, summary, source, published_at, raw_content, created_at FROM articles WHERE link = ?"
+    query = "SELECT * FROM articles WHERE link = ?"
 
     should_close = False
     if conn is None:
@@ -135,6 +135,85 @@ def get_article_by_link(link: str, conn: sqlite3.Connection = None) -> dict | No
             conn.close()
 
 
+def get_article_by_id(article_id: int, conn: sqlite3.Connection = None) -> dict | None:
+    """
+    Retrieve an article by its primary key ID.
+
+    Args:
+        article_id: Article primary key ID.
+        conn: Optional active sqlite3.Connection.
+
+    Returns:
+        dict representation of the database record or None if not found.
+    """
+    query = "SELECT * FROM articles WHERE id = ?"
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, (article_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        if should_close:
+            conn.close()
+
+
+def update_article_enrichment(
+    article_id: int,
+    content: str | None,
+    status: str,
+    error: str | None = None,
+    conn: sqlite3.Connection = None,
+) -> bool:
+    """
+    Update the enrichment fields for an article.
+
+    Args:
+        article_id: Article primary key ID.
+        content: Extracted article text (or None if unavailable/failed).
+        status: Enrichment status ('enriched', 'not_needed', 'failed', 'pending').
+        error: Error message if enrichment failed.
+        conn: Optional active sqlite3.Connection.
+
+    Returns:
+        bool: True if article record was updated, False otherwise.
+    """
+    query = """
+        UPDATE articles
+        SET content = :content,
+            enrichment_status = :status,
+            enrichment_error = :error,
+            enriched_at = CURRENT_TIMESTAMP
+        WHERE id = :article_id
+    """
+    payload = {
+        "article_id": article_id,
+        "content": content,
+        "status": status,
+        "error": error,
+    }
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, payload)
+        conn.commit()
+        updated = cursor.rowcount > 0
+        return updated
+    finally:
+        if should_close:
+            conn.close()
+
+
 def get_all_articles(limit: int = 100, conn: sqlite3.Connection = None) -> list[dict]:
     """
     Retrieve all stored articles ordered by ID descending.
@@ -146,7 +225,7 @@ def get_all_articles(limit: int = 100, conn: sqlite3.Connection = None) -> list[
     Returns:
         List of article dictionary records.
     """
-    query = "SELECT id, title, link, summary, source, published_at, raw_content, created_at FROM articles ORDER BY id DESC LIMIT ?"
+    query = "SELECT * FROM articles ORDER BY id DESC LIMIT ?"
 
     should_close = False
     if conn is None:
