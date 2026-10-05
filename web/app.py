@@ -179,6 +179,99 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/status")
+    async def status():
+        """Health and telemetry status endpoint for continuous monitor (Step 14)."""
+        from database import get_connection
+        from config import TELEGRAM_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+        from llm.laya_shadow import is_laya_active
+
+        db_reachable = False
+        monitor_running = False
+        last_poll = None
+        pending_articles = 0
+        pending_analyses = 0
+        last_analysis = None
+        sources_summary = {"total": 0, "healthy": 0, "failing": 0}
+
+        try:
+            with get_connection() as conn:
+                db_reachable = True
+                c = conn.cursor()
+
+                # Check monitor heartbeat within last 120 seconds
+                c.execute(
+                    """
+                    SELECT last_heartbeat, status, pid,
+                           strftime('%s', 'now') - strftime('%s', last_heartbeat) as seconds_ago
+                    FROM monitor_heartbeat
+                    WHERE id = 1
+                    """
+                )
+                hb = c.fetchone()
+                if hb and hb["status"] == "running" and hb["seconds_ago"] is not None and hb["seconds_ago"] <= 120:
+                    monitor_running = True
+
+                # Last successful poll
+                c.execute("SELECT MAX(last_success_at) as last_poll FROM source_state")
+                poll_row = c.fetchone()
+                if poll_row and poll_row["last_poll"]:
+                    last_poll = poll_row["last_poll"]
+
+                # Pending articles in queue
+                c.execute(
+                    "SELECT COUNT(*) as cnt FROM article_pipeline_state WHERE stage IN ('NEW', 'ENRICHED', 'ANALYSIS_PENDING')"
+                )
+                cnt_row = c.fetchone()
+                pending_articles = cnt_row["cnt"] if cnt_row else 0
+
+                # Pending analyses specifically
+                c.execute(
+                    "SELECT COUNT(*) as cnt FROM article_pipeline_state WHERE stage IN ('ENRICHED', 'ANALYSIS_PENDING')"
+                )
+                ana_cnt = c.fetchone()
+                pending_analyses = ana_cnt["cnt"] if ana_cnt else 0
+
+                # Last successful analysis
+                c.execute(
+                    "SELECT MAX(created_at) as last_analysis FROM article_analysis WHERE status = 'completed'"
+                )
+                ana_row = c.fetchone()
+                if ana_row and ana_row["last_analysis"]:
+                    last_analysis = ana_row["last_analysis"]
+
+                # Sources health
+                c.execute(
+                    "SELECT COUNT(*) as total, SUM(CASE WHEN consecutive_failures == 0 THEN 1 ELSE 0 END) as healthy FROM source_state"
+                )
+                src_row = c.fetchone()
+                if src_row:
+                    total_s = src_row["total"] or 0
+                    healthy_s = src_row["healthy"] or 0
+                    sources_summary = {
+                        "total": total_s,
+                        "healthy": healthy_s,
+                        "failing": total_s - healthy_s,
+                    }
+        except Exception:
+            db_reachable = False
+
+        telegram_configured = bool(TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+        laya_enabled = is_laya_active()
+
+        return {
+            "status": "ok" if db_reachable else "degraded",
+            "monitor_running": monitor_running,
+            "database_reachable": db_reachable,
+            "last_successful_poll": last_poll,
+            "pending_articles": pending_articles,
+            "pending_analyses": pending_analyses,
+            "last_successful_analysis": last_analysis,
+            "telegram_configured": telegram_configured,
+            "laya_enabled": laya_enabled,
+            "sources": sources_summary,
+        }
+
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc):
         return templates.TemplateResponse(

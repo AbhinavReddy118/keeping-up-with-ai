@@ -36,6 +36,73 @@ def parse_rss_content(content: str | bytes) -> list[dict]:
     return entries
 
 
+def fetch_rss_feed_conditional(
+    feed_url: str,
+    timeout: int = 10,
+    etag: str | None = None,
+    last_modified: str | None = None,
+) -> tuple[list[dict], str | None, str | None, bool]:
+    """
+    Fetch an RSS/Atom feed conditionally using ETag and Last-Modified headers.
+
+    Args:
+        feed_url: Absolute HTTP/HTTPS URL of the RSS feed.
+        timeout: Network request timeout in seconds (default: 10s).
+        etag: Optional previously recorded ETag header value.
+        last_modified: Optional previously recorded Last-Modified header value.
+
+    Returns:
+        tuple of (entries, new_etag, new_last_modified, not_modified):
+            - entries: list of parsed entry dictionaries
+            - new_etag: ETag string from response headers if provided
+            - new_last_modified: Last-Modified string from response headers if provided
+            - not_modified: True if HTTP 304 was returned, False otherwise
+
+    Raises:
+        ValueError: If feed_url is invalid or missing scheme.
+        RuntimeError: If network request fails or times out.
+    """
+    if not (feed_url.startswith("http://") or feed_url.startswith("https://")):
+        raise ValueError(f"Invalid feed URL scheme: '{feed_url}'. URL must start with http:// or https://")
+
+    headers = {"User-Agent": USER_AGENT}
+    if etag:
+        headers["If-None-Match"] = etag
+    if last_modified:
+        headers["If-Modified-Since"] = last_modified
+
+    req = urllib.request.Request(feed_url, headers=headers)
+
+    try:
+        logger.info(f"Fetching RSS feed from: {feed_url}")
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            xml_content = response.read()
+            new_etag = response.headers.get("ETag")
+            new_last_modified = response.headers.get("Last-Modified")
+            entries = parse_rss_content(xml_content)
+            return entries, new_etag, new_last_modified, False
+
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            logger.info(f"Feed '{feed_url}' not modified (HTTP 304).")
+            return [], etag, last_modified, True
+
+        logger.error(f"HTTP error ({e.code}) while fetching feed '{feed_url}': {e.reason}")
+        raise RuntimeError(f"HTTP {e.code} error fetching feed: {e.reason}") from e
+
+    except urllib.error.URLError as e:
+        logger.error(f"Network error while fetching feed '{feed_url}': {e.reason}")
+        raise RuntimeError(f"Failed to reach feed server: {e.reason}") from e
+
+    except TimeoutError as e:
+        logger.error(f"Timeout ({timeout}s) exceeded while fetching feed '{feed_url}'")
+        raise RuntimeError(f"Request timed out after {timeout} seconds") from e
+
+    except Exception as e:
+        logger.error(f"Unexpected error while fetching feed '{feed_url}': {str(e)}")
+        raise RuntimeError(f"Unexpected feed fetching error: {str(e)}") from e
+
+
 def fetch_rss_feed(feed_url: str, timeout: int = 10) -> list[dict]:
     """
     Fetch an RSS/Atom feed from a URL and return parsed entries.
@@ -51,32 +118,5 @@ def fetch_rss_feed(feed_url: str, timeout: int = 10) -> list[dict]:
         ValueError: If feed_url is invalid or missing scheme.
         RuntimeError: If network request fails or times out.
     """
-    if not (feed_url.startswith("http://") or feed_url.startswith("https://")):
-        raise ValueError(f"Invalid feed URL scheme: '{feed_url}'. URL must start with http:// or https://")
-
-    req = urllib.request.Request(
-        feed_url,
-        headers={"User-Agent": USER_AGENT}
-    )
-
-    try:
-        logger.info(f"Fetching RSS feed from: {feed_url}")
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            xml_content = response.read()
-            return parse_rss_content(xml_content)
-
-    except urllib.error.HTTPError as e:
-        logger.error(f"HTTP error ({e.code}) while fetching feed '{feed_url}': {e.reason}")
-        raise RuntimeError(f"HTTP {e.code} error fetching feed: {e.reason}") from e
-
-    except urllib.error.URLError as e:
-        logger.error(f"Network error while fetching feed '{feed_url}': {e.reason}")
-        raise RuntimeError(f"Failed to reach feed server: {e.reason}") from e
-
-    except TimeoutError as e:
-        logger.error(f"Timeout ({timeout}s) exceeded while fetching feed '{feed_url}'")
-        raise RuntimeError(f"Request timed out after {timeout} seconds") from e
-
-    except Exception as e:
-        logger.error(f"Unexpected error while fetching feed '{feed_url}': {str(e)}")
-        raise RuntimeError(f"Unexpected feed fetching error: {str(e)}") from e
+    entries, _, _, _ = fetch_rss_feed_conditional(feed_url, timeout=timeout)
+    return entries

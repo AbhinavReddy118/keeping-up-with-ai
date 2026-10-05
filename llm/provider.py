@@ -488,9 +488,11 @@ def get_llm_provider(
     Raises:
         LLMConfigurationError: If requested provider is unsupported or missing credentials.
     """
+    import os
     from config import LLM_PROVIDER, LLM_MODEL, LLM_API_KEY, LLM_BASE_URL
 
-    selected = (provider_name or LLM_PROVIDER or "mock").strip().lower()
+    active_provider = os.getenv("LLM_PROVIDER", LLM_PROVIDER)
+    selected = (provider_name or active_provider or "mock").strip().lower()
 
     if selected == "mock":
         return MockLLMProvider(**kwargs)

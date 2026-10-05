@@ -34,3 +34,19 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TELEGRAM_MIN_SCORE = float(os.getenv("TELEGRAM_MIN_SCORE", "0.0"))
 TELEGRAM_LIMIT = max(1, int(os.getenv("TELEGRAM_LIMIT", "5")))
 
+# Laya Shadow Triage Configuration (defaults to false for MVP)
+LAYA_ENABLED = os.getenv("LAYA_ENABLED", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+LAYA_MODEL_ID = os.getenv("LAYA_MODEL_ID", "convaiinnovations/laya")
+
+# Continuous Monitor Polling Interval Configuration
+MONITOR_POLL_INTERVAL_TIER1_MINUTES = int(os.getenv("MONITOR_POLL_INTERVAL_TIER1_MINUTES", "20"))
+MONITOR_POLL_INTERVAL_TIER2_MINUTES = int(os.getenv("MONITOR_POLL_INTERVAL_TIER2_MINUTES", "40"))
+MONITOR_POLL_INTERVAL_TIER3_HOURS = int(os.getenv("MONITOR_POLL_INTERVAL_TIER3_HOURS", "24"))
+MONITOR_HEARTBEAT_SECONDS = int(os.getenv("MONITOR_HEARTBEAT_SECONDS", "30"))
+MONITOR_BATCH_SIZE = int(os.getenv("MONITOR_BATCH_SIZE", "10"))
+

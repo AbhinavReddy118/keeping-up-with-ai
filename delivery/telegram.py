@@ -125,9 +125,89 @@ def send_telegram_message(
     return parsed
 
 
+def is_article_delivered(
+    article_id: int,
+    channel: str = "telegram",
+    conn=None,
+    db_path=None,
+) -> bool:
+    """Check if an article has already been successfully delivered."""
+    from database import get_connection
+
+    should_close = False
+    if conn is None:
+        try:
+            conn = get_connection(db_path)
+            should_close = True
+        except Exception:
+            return False
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM article_deliveries WHERE article_id = ? AND channel = ? AND status = 'sent'",
+            (article_id, channel),
+        )
+        return cursor.fetchone() is not None
+    except Exception:
+        return False
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def record_article_delivery(
+    article_id: int,
+    channel: str = "telegram",
+    score: float | None = None,
+    status: str = "sent",
+    conn=None,
+    db_path=None,
+) -> None:
+    """Record an article delivery attempt in the database."""
+    from database import get_connection
+
+    should_close = False
+    if conn is None:
+        try:
+            conn = get_connection(db_path)
+            should_close = True
+        except Exception:
+            return
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO article_deliveries (article_id, channel, score, status, sent_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(article_id) DO UPDATE SET
+                status = excluded.status,
+                score = excluded.score,
+                sent_at = CURRENT_TIMESTAMP
+            """,
+            (article_id, channel, score, status),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def deliver_ranked_articles(
     ranked_articles: Sequence[dict],
     config: TelegramConfig,
+    conn=None,
+    db_path=None,
+    deduplicate: bool = False,
 ) -> dict:
     """Deliver the highest-scoring articles and return per-message results."""
     if not config.enabled or not config.bot_token or not config.chat_id:
@@ -146,11 +226,16 @@ def deliver_ranked_articles(
             "details": [],
         }
 
-    candidates = [
-        article
-        for article in ranked_articles
-        if float(article.get("final_score", 0.0)) >= config.min_score
-    ]
+    candidates = []
+    for article in ranked_articles:
+        if float(article.get("final_score", 0.0)) < config.min_score:
+            continue
+        art_id = article.get("article_id")
+        if deduplicate and art_id is not None:
+            if is_article_delivered(art_id, channel="telegram", conn=conn, db_path=db_path):
+                continue
+        candidates.append(article)
+
     selected = candidates[: config.limit]
     details = []
     sent = 0
@@ -162,23 +247,43 @@ def deliver_ranked_articles(
             position=index,
             total=len(selected),
         )
+        art_id = article.get("article_id")
+        score_val = float(article.get("final_score", 0.0))
         try:
             response = send_telegram_message(
                 config.bot_token,
                 config.chat_id,
                 message,
             )
-            details.append({"ok": True, "article_id": article.get("article_id")})
+            details.append({"ok": True, "article_id": art_id})
             sent += 1
+            if art_id is not None:
+                record_article_delivery(
+                    art_id,
+                    channel="telegram",
+                    score=score_val,
+                    status="sent",
+                    conn=conn,
+                    db_path=db_path,
+                )
         except TelegramDeliveryError as exc:
             details.append(
                 {
                     "ok": False,
                     "error": str(exc),
-                    "article_id": article.get("article_id"),
+                    "article_id": art_id,
                 }
             )
             failed += 1
+            if art_id is not None:
+                record_article_delivery(
+                    art_id,
+                    channel="telegram",
+                    score=score_val,
+                    status="failed",
+                    conn=conn,
+                    db_path=db_path,
+                )
 
     return {
         "enabled": True,

@@ -243,7 +243,12 @@ def run_full_pipeline(
 
     if deliver and ranked_articles:
         config = telegram_config or TelegramConfig.from_env()
-        delivery_report = deliver_ranked_articles(ranked_articles, config)
+        delivery_report = deliver_ranked_articles(
+            ranked_articles,
+            config,
+            db_path=db_path,
+            deduplicate=True,
+        )
         result["delivery"] = delivery_report
         if delivery_report["enabled"]:
             logger.info(

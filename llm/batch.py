@@ -89,7 +89,7 @@ def get_unprocessed_articles(
         List of article dictionary records.
     """
     query = """
-        SELECT a.id, a.title, a.link, a.summary, a.source, a.published_at, a.raw_content
+        SELECT a.id, a.title, a.link, a.summary, a.source, a.published_at, a.raw_content, a.content
         FROM articles a
         LEFT JOIN article_analysis an ON a.id = an.article_id
         WHERE an.id IS NULL OR an.status != 'completed'
@@ -374,13 +374,14 @@ class BatchProcessor:
         Process exactly one article with bounded retries for transient errors.
         Never allows an exception to escape; returns execution summary for the article.
         """
-        article_id = article.get("id")
+        raw_id = article.get("id")
+        article_id = int(raw_id) if raw_id is not None else 0
         provider_name = self.provider.name
         model_name = getattr(self.provider, "model", "mock-model")
 
         attempts = 0
         retries_used = 0
-        last_error = None
+        last_error: Optional[Exception] = None
 
         while attempts <= self.max_retries:
             attempts += 1
@@ -426,9 +427,10 @@ class BatchProcessor:
                     break
 
         # Persist failure record
+        actual_error = last_error if last_error is not None else RuntimeError("Unknown analysis failure")
         save_analysis_failure(
             article_id=article_id,
-            error=last_error,
+            error=actual_error,
             provider=provider_name,
             model=model_name,
             attempts=attempts,
