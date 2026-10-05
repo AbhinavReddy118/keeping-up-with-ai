@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import pytest
 
+from evaluation.evaluate_laya import map_laya_importance_probabilities
 from evaluation.evaluate_laya_phase_0_4 import (
     CANONICAL_CLASSES,
     BASELINE_IMPORTANCE_MAP,
@@ -16,6 +17,7 @@ from evaluation.evaluate_laya_phase_0_4 import (
     compute_comprehensive_metrics,
     evaluate_operational_gate,
     map_prediction_to_canonical,
+    map_prediction_to_canonical_corrected,
     verify_dataset_integrity,
 )
 
@@ -272,4 +274,42 @@ def test_phase_0_4_operational_analysis_artifact():
         assert pol["must_know_passed"] + pol["must_know_false_negatives"] == pol["must_know_total"] == 64
         assert pol["noise_passed"] + pol["noise_filtered"] == pol["noise_total"] == 18
         assert pol["pct_passed"] + pol["qwen_reduction_pct"] == pytest.approx(100.0)
+
+
+def test_canonical_probability_argmax_regression():
+    """
+    Regression test validating that the 3-way canonical probability argmax
+    correctly resolves cases where P(low) + P(ignore) > P(medium) > P(low), P(ignore).
+
+    Example: Article 2305:
+    P(high) = 0.2081
+    P(medium) = 0.3223
+    P(low) = 0.2638
+    P(ignore) = 0.2059
+
+    Old 4-way argmax picked 'medium' -> mapped to 'INTERESTING'.
+    Correct canonical 3-way mapping combines P(low) + P(ignore) = 0.4697.
+    Argmax(0.2081, 0.3223, 0.4697) -> 'NOISE'.
+    """
+    raw_probs = {
+        "high": 0.2081,
+        "medium": 0.3223,
+        "low": 0.2638,
+        "ignore": 0.2059,
+    }
+    # Test evaluate_laya helper
+    mapped_label_03, c_probs_03 = map_laya_importance_probabilities(raw_probs)
+    assert c_probs_03["MUST_KNOW"] == 0.2081
+    assert c_probs_03["INTERESTING"] == 0.3223
+    assert c_probs_03["NOISE"] == 0.4697
+    assert mapped_label_03 == "NOISE"
+
+    # Test evaluate_laya_phase_0_4 corrected helper
+    mapped_label_04, c_probs_04 = map_prediction_to_canonical_corrected(
+        "baseline", "medium", raw_probs
+    )
+    assert mapped_label_04 == "NOISE"
+    assert c_probs_04["NOISE"] == 0.4697
+    assert c_probs_04["INTERESTING"] == 0.3223
+    assert c_probs_04["MUST_KNOW"] == 0.2081
 

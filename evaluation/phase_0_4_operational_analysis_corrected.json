@@ -1,0 +1,775 @@
+{
+  "metadata": {
+    "description": "Corrected Phase 0.4 analysis using 3-way canonical probability argmax",
+    "total_predictions": 900,
+    "mapping_correction": "argmax(P(high), P(medium), P(low)+P(ignore))"
+  },
+  "experiment_metrics": {
+    "E1": {
+      "total_count": 150,
+      "correct_count": 52,
+      "incorrect_count": 98,
+      "accuracy": 0.3467,
+      "macro": {
+        "precision": 0.3535,
+        "recall": 0.3406,
+        "f1": 0.3097
+      },
+      "weighted": {
+        "precision": 0.4193,
+        "recall": 0.3467,
+        "f1": 0.3468
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.52,
+          "recall": 0.2031,
+          "f1": 0.2921,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.3976,
+          "recall": 0.4853,
+          "f1": 0.4371,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.1429,
+          "recall": 0.3333,
+          "f1": 0.2,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          13,
+          39,
+          12
+        ],
+        [
+          11,
+          33,
+          24
+        ],
+        [
+          1,
+          11,
+          6
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 25,
+        "INTERESTING": 83,
+        "NOISE": 42
+      },
+      "must_know_recall": 0.2031,
+      "noise_recall": 0.3333,
+      "interesting_recall": 0.4853,
+      "margin_stats": {
+        "average_confidence": 0.4545,
+        "average_margin": 0.1099,
+        "low_margin_count_15": 112,
+        "low_margin_count_10": 85
+      },
+      "latency_stats": {
+        "average_ms": 216.37,
+        "median_ms": 212.94,
+        "p95_ms": 237.14,
+        "min_ms": 190.91,
+        "max_ms": 304.42
+      }
+    },
+    "E2": {
+      "total_count": 150,
+      "correct_count": 63,
+      "incorrect_count": 87,
+      "accuracy": 0.42,
+      "macro": {
+        "precision": 0.3529,
+        "recall": 0.3298,
+        "f1": 0.3321
+      },
+      "weighted": {
+        "precision": 0.4496,
+        "recall": 0.42,
+        "f1": 0.4229
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.5714,
+          "recall": 0.375,
+          "f1": 0.4528,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.4419,
+          "recall": 0.5588,
+          "f1": 0.4935,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.0455,
+          "recall": 0.0556,
+          "f1": 0.05,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          24,
+          34,
+          6
+        ],
+        [
+          15,
+          38,
+          15
+        ],
+        [
+          3,
+          14,
+          1
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 42,
+        "INTERESTING": 86,
+        "NOISE": 22
+      },
+      "must_know_recall": 0.375,
+      "noise_recall": 0.0556,
+      "interesting_recall": 0.5588,
+      "margin_stats": {
+        "average_confidence": 0.4747,
+        "average_margin": 0.1518,
+        "low_margin_count_15": 79,
+        "low_margin_count_10": 59
+      },
+      "latency_stats": {
+        "average_ms": 267.67,
+        "median_ms": 259.84,
+        "p95_ms": 344.24,
+        "min_ms": 197.14,
+        "max_ms": 384.0
+      }
+    },
+    "E3": {
+      "total_count": 150,
+      "correct_count": 61,
+      "incorrect_count": 89,
+      "accuracy": 0.4067,
+      "macro": {
+        "precision": 0.3386,
+        "recall": 0.3203,
+        "f1": 0.3237
+      },
+      "weighted": {
+        "precision": 0.4308,
+        "recall": 0.4067,
+        "f1": 0.4115
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.5435,
+          "recall": 0.3906,
+          "f1": 0.4545,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.4268,
+          "recall": 0.5147,
+          "f1": 0.4667,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.0455,
+          "recall": 0.0556,
+          "f1": 0.05,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          25,
+          33,
+          6
+        ],
+        [
+          18,
+          35,
+          15
+        ],
+        [
+          3,
+          14,
+          1
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 46,
+        "INTERESTING": 82,
+        "NOISE": 22
+      },
+      "must_know_recall": 0.3906,
+      "noise_recall": 0.0556,
+      "interesting_recall": 0.5147,
+      "margin_stats": {
+        "average_confidence": 0.4757,
+        "average_margin": 0.1455,
+        "low_margin_count_15": 81,
+        "low_margin_count_10": 63
+      },
+      "latency_stats": {
+        "average_ms": 287.98,
+        "median_ms": 254.56,
+        "p95_ms": 464.8,
+        "min_ms": 198.49,
+        "max_ms": 531.91
+      }
+    },
+    "E4": {
+      "total_count": 150,
+      "correct_count": 71,
+      "incorrect_count": 79,
+      "accuracy": 0.4733,
+      "macro": {
+        "precision": 0.5159,
+        "recall": 0.3632,
+        "f1": 0.2863
+      },
+      "weighted": {
+        "precision": 0.596,
+        "recall": 0.4733,
+        "f1": 0.3552
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.8333,
+          "recall": 0.0781,
+          "f1": 0.1429,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.4643,
+          "recall": 0.9559,
+          "f1": 0.625,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.25,
+          "recall": 0.0556,
+          "f1": 0.0909,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          5,
+          59,
+          0
+        ],
+        [
+          0,
+          65,
+          3
+        ],
+        [
+          1,
+          16,
+          1
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 6,
+        "INTERESTING": 140,
+        "NOISE": 4
+      },
+      "must_know_recall": 0.0781,
+      "noise_recall": 0.0556,
+      "interesting_recall": 0.9559,
+      "margin_stats": {
+        "average_confidence": 0.5616,
+        "average_margin": 0.2745,
+        "low_margin_count_15": 37,
+        "low_margin_count_10": 23
+      },
+      "latency_stats": {
+        "average_ms": 225.0,
+        "median_ms": 211.42,
+        "p95_ms": 248.16,
+        "min_ms": 183.42,
+        "max_ms": 949.69
+      }
+    },
+    "E5": {
+      "total_count": 150,
+      "correct_count": 68,
+      "incorrect_count": 82,
+      "accuracy": 0.4533,
+      "macro": {
+        "precision": 0.329,
+        "recall": 0.3355,
+        "f1": 0.26
+      },
+      "weighted": {
+        "precision": 0.4331,
+        "recall": 0.4533,
+        "f1": 0.3487
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.5385,
+          "recall": 0.1094,
+          "f1": 0.1818,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.4485,
+          "recall": 0.8971,
+          "f1": 0.598,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          7,
+          57,
+          0
+        ],
+        [
+          6,
+          61,
+          1
+        ],
+        [
+          0,
+          18,
+          0
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 13,
+        "INTERESTING": 136,
+        "NOISE": 1
+      },
+      "must_know_recall": 0.1094,
+      "noise_recall": 0.0,
+      "interesting_recall": 0.8971,
+      "margin_stats": {
+        "average_confidence": 0.5896,
+        "average_margin": 0.2946,
+        "low_margin_count_15": 30,
+        "low_margin_count_10": 16
+      },
+      "latency_stats": {
+        "average_ms": 340.64,
+        "median_ms": 332.96,
+        "p95_ms": 485.91,
+        "min_ms": 224.67,
+        "max_ms": 777.09
+      }
+    },
+    "E6": {
+      "total_count": 150,
+      "correct_count": 68,
+      "incorrect_count": 82,
+      "accuracy": 0.4533,
+      "macro": {
+        "precision": 0.329,
+        "recall": 0.3355,
+        "f1": 0.26
+      },
+      "weighted": {
+        "precision": 0.4331,
+        "recall": 0.4533,
+        "f1": 0.3487
+      },
+      "per_class": {
+        "MUST_KNOW": {
+          "precision": 0.5385,
+          "recall": 0.1094,
+          "f1": 0.1818,
+          "support": 64
+        },
+        "INTERESTING": {
+          "precision": 0.4485,
+          "recall": 0.8971,
+          "f1": 0.598,
+          "support": 68
+        },
+        "NOISE": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 18
+        }
+      },
+      "confusion_matrix": [
+        [
+          7,
+          57,
+          0
+        ],
+        [
+          6,
+          61,
+          1
+        ],
+        [
+          0,
+          18,
+          0
+        ]
+      ],
+      "prediction_distribution": {
+        "MUST_KNOW": 13,
+        "INTERESTING": 136,
+        "NOISE": 1
+      },
+      "must_know_recall": 0.1094,
+      "noise_recall": 0.0,
+      "interesting_recall": 0.8971,
+      "margin_stats": {
+        "average_confidence": 0.5948,
+        "average_margin": 0.3002,
+        "low_margin_count_15": 30,
+        "low_margin_count_10": 17
+      },
+      "latency_stats": {
+        "average_ms": 374.48,
+        "median_ms": 328.72,
+        "p95_ms": 579.05,
+        "min_ms": 244.02,
+        "max_ms": 1165.0
+      }
+    }
+  },
+  "operational_policies": [
+    {
+      "policy": "E1: ArgMax Gate (Skip NOISE)",
+      "articles_passed": 108,
+      "articles_skipped": 42,
+      "pct_passed": 72.0,
+      "qwen_reduction_pct": 28.0,
+      "must_know_passed": 52,
+      "must_know_total": 64,
+      "must_know_recall_pct": 81.25,
+      "must_know_false_negatives": 12,
+      "noise_passed": 12,
+      "noise_total": 18,
+      "noise_filtered": 6,
+      "noise_filter_rate_pct": 33.33,
+      "interesting_passed": 44,
+      "interesting_total": 68,
+      "interesting_skipped": 24,
+      "total_false_skips": 36,
+      "total_false_passes": 12
+    },
+    {
+      "policy": "E1: Strict Must-Know Only",
+      "articles_passed": 25,
+      "articles_skipped": 125,
+      "pct_passed": 16.67,
+      "qwen_reduction_pct": 83.33,
+      "must_know_passed": 13,
+      "must_know_total": 64,
+      "must_know_recall_pct": 20.31,
+      "must_know_false_negatives": 51,
+      "noise_passed": 1,
+      "noise_total": 18,
+      "noise_filtered": 17,
+      "noise_filter_rate_pct": 94.44,
+      "interesting_passed": 11,
+      "interesting_total": 68,
+      "interesting_skipped": 57,
+      "total_false_skips": 108,
+      "total_false_passes": 1
+    },
+    {
+      "policy": "E1: Prob Gate P(NOISE) < 0.40",
+      "articles_passed": 102,
+      "articles_skipped": 48,
+      "pct_passed": 68.0,
+      "qwen_reduction_pct": 32.0,
+      "must_know_passed": 52,
+      "must_know_total": 64,
+      "must_know_recall_pct": 81.25,
+      "must_know_false_negatives": 12,
+      "noise_passed": 10,
+      "noise_total": 18,
+      "noise_filtered": 8,
+      "noise_filter_rate_pct": 44.44,
+      "interesting_passed": 40,
+      "interesting_total": 68,
+      "interesting_skipped": 28,
+      "total_false_skips": 40,
+      "total_false_passes": 10
+    },
+    {
+      "policy": "E1: Prob Gate P(NOISE) < 0.25",
+      "articles_passed": 22,
+      "articles_skipped": 128,
+      "pct_passed": 14.67,
+      "qwen_reduction_pct": 85.33,
+      "must_know_passed": 10,
+      "must_know_total": 64,
+      "must_know_recall_pct": 15.62,
+      "must_know_false_negatives": 54,
+      "noise_passed": 1,
+      "noise_total": 18,
+      "noise_filtered": 17,
+      "noise_filter_rate_pct": 94.44,
+      "interesting_passed": 11,
+      "interesting_total": 68,
+      "interesting_skipped": 57,
+      "total_false_skips": 111,
+      "total_false_passes": 1
+    },
+    {
+      "policy": "E1: High-Recall Guarded (P(MK)>=0.20 or pred!=NOISE)",
+      "articles_passed": 115,
+      "articles_skipped": 35,
+      "pct_passed": 76.67,
+      "qwen_reduction_pct": 23.33,
+      "must_know_passed": 56,
+      "must_know_total": 64,
+      "must_know_recall_pct": 87.5,
+      "must_know_false_negatives": 8,
+      "noise_passed": 12,
+      "noise_total": 18,
+      "noise_filtered": 6,
+      "noise_filter_rate_pct": 33.33,
+      "interesting_passed": 47,
+      "interesting_total": 68,
+      "interesting_skipped": 21,
+      "total_false_skips": 29,
+      "total_false_passes": 12
+    },
+    {
+      "policy": "E2: ArgMax Gate (Skip NOISE)",
+      "articles_passed": 128,
+      "articles_skipped": 22,
+      "pct_passed": 85.33,
+      "qwen_reduction_pct": 14.67,
+      "must_know_passed": 58,
+      "must_know_total": 64,
+      "must_know_recall_pct": 90.62,
+      "must_know_false_negatives": 6,
+      "noise_passed": 17,
+      "noise_total": 18,
+      "noise_filtered": 1,
+      "noise_filter_rate_pct": 5.56,
+      "interesting_passed": 53,
+      "interesting_total": 68,
+      "interesting_skipped": 15,
+      "total_false_skips": 21,
+      "total_false_passes": 17
+    },
+    {
+      "policy": "E2: Strict Must-Know Only",
+      "articles_passed": 42,
+      "articles_skipped": 108,
+      "pct_passed": 28.0,
+      "qwen_reduction_pct": 72.0,
+      "must_know_passed": 24,
+      "must_know_total": 64,
+      "must_know_recall_pct": 37.5,
+      "must_know_false_negatives": 40,
+      "noise_passed": 3,
+      "noise_total": 18,
+      "noise_filtered": 15,
+      "noise_filter_rate_pct": 83.33,
+      "interesting_passed": 15,
+      "interesting_total": 68,
+      "interesting_skipped": 53,
+      "total_false_skips": 93,
+      "total_false_passes": 3
+    },
+    {
+      "policy": "E2: Prob Gate P(NOISE) < 0.40",
+      "articles_passed": 130,
+      "articles_skipped": 20,
+      "pct_passed": 86.67,
+      "qwen_reduction_pct": 13.33,
+      "must_know_passed": 59,
+      "must_know_total": 64,
+      "must_know_recall_pct": 92.19,
+      "must_know_false_negatives": 5,
+      "noise_passed": 16,
+      "noise_total": 18,
+      "noise_filtered": 2,
+      "noise_filter_rate_pct": 11.11,
+      "interesting_passed": 55,
+      "interesting_total": 68,
+      "interesting_skipped": 13,
+      "total_false_skips": 18,
+      "total_false_passes": 16
+    },
+    {
+      "policy": "E2: Prob Gate P(NOISE) < 0.25",
+      "articles_passed": 76,
+      "articles_skipped": 74,
+      "pct_passed": 50.67,
+      "qwen_reduction_pct": 49.33,
+      "must_know_passed": 38,
+      "must_know_total": 64,
+      "must_know_recall_pct": 59.38,
+      "must_know_false_negatives": 26,
+      "noise_passed": 6,
+      "noise_total": 18,
+      "noise_filtered": 12,
+      "noise_filter_rate_pct": 66.67,
+      "interesting_passed": 32,
+      "interesting_total": 68,
+      "interesting_skipped": 36,
+      "total_false_skips": 62,
+      "total_false_passes": 6
+    },
+    {
+      "policy": "E2: High-Recall Guarded (P(MK)>=0.20 or pred!=NOISE)",
+      "articles_passed": 137,
+      "articles_skipped": 13,
+      "pct_passed": 91.33,
+      "qwen_reduction_pct": 8.67,
+      "must_know_passed": 61,
+      "must_know_total": 64,
+      "must_know_recall_pct": 95.31,
+      "must_know_false_negatives": 3,
+      "noise_passed": 18,
+      "noise_total": 18,
+      "noise_filtered": 0,
+      "noise_filter_rate_pct": 0.0,
+      "interesting_passed": 58,
+      "interesting_total": 68,
+      "interesting_skipped": 10,
+      "total_false_skips": 13,
+      "total_false_passes": 18
+    },
+    {
+      "policy": "E3: ArgMax Gate (Skip NOISE)",
+      "articles_passed": 128,
+      "articles_skipped": 22,
+      "pct_passed": 85.33,
+      "qwen_reduction_pct": 14.67,
+      "must_know_passed": 58,
+      "must_know_total": 64,
+      "must_know_recall_pct": 90.62,
+      "must_know_false_negatives": 6,
+      "noise_passed": 17,
+      "noise_total": 18,
+      "noise_filtered": 1,
+      "noise_filter_rate_pct": 5.56,
+      "interesting_passed": 53,
+      "interesting_total": 68,
+      "interesting_skipped": 15,
+      "total_false_skips": 21,
+      "total_false_passes": 17
+    },
+    {
+      "policy": "E3: Strict Must-Know Only",
+      "articles_passed": 46,
+      "articles_skipped": 104,
+      "pct_passed": 30.67,
+      "qwen_reduction_pct": 69.33,
+      "must_know_passed": 25,
+      "must_know_total": 64,
+      "must_know_recall_pct": 39.06,
+      "must_know_false_negatives": 39,
+      "noise_passed": 3,
+      "noise_total": 18,
+      "noise_filtered": 15,
+      "noise_filter_rate_pct": 83.33,
+      "interesting_passed": 18,
+      "interesting_total": 68,
+      "interesting_skipped": 50,
+      "total_false_skips": 89,
+      "total_false_passes": 3
+    },
+    {
+      "policy": "E3: Prob Gate P(NOISE) < 0.40",
+      "articles_passed": 130,
+      "articles_skipped": 20,
+      "pct_passed": 86.67,
+      "qwen_reduction_pct": 13.33,
+      "must_know_passed": 59,
+      "must_know_total": 64,
+      "must_know_recall_pct": 92.19,
+      "must_know_false_negatives": 5,
+      "noise_passed": 16,
+      "noise_total": 18,
+      "noise_filtered": 2,
+      "noise_filter_rate_pct": 11.11,
+      "interesting_passed": 55,
+      "interesting_total": 68,
+      "interesting_skipped": 13,
+      "total_false_skips": 18,
+      "total_false_passes": 16
+    },
+    {
+      "policy": "E3: Prob Gate P(NOISE) < 0.25",
+      "articles_passed": 83,
+      "articles_skipped": 67,
+      "pct_passed": 55.33,
+      "qwen_reduction_pct": 44.67,
+      "must_know_passed": 41,
+      "must_know_total": 64,
+      "must_know_recall_pct": 64.06,
+      "must_know_false_negatives": 23,
+      "noise_passed": 6,
+      "noise_total": 18,
+      "noise_filtered": 12,
+      "noise_filter_rate_pct": 66.67,
+      "interesting_passed": 36,
+      "interesting_total": 68,
+      "interesting_skipped": 32,
+      "total_false_skips": 55,
+      "total_false_passes": 6
+    },
+    {
+      "policy": "E3: High-Recall Guarded (P(MK)>=0.20 or pred!=NOISE)",
+      "articles_passed": 137,
+      "articles_skipped": 13,
+      "pct_passed": 91.33,
+      "qwen_reduction_pct": 8.67,
+      "must_know_passed": 61,
+      "must_know_total": 64,
+      "must_know_recall_pct": 95.31,
+      "must_know_false_negatives": 3,
+      "noise_passed": 18,
+      "noise_total": 18,
+      "noise_filtered": 0,
+      "noise_filter_rate_pct": 0.0,
+      "interesting_passed": 58,
+      "interesting_total": 68,
+      "interesting_skipped": 10,
+      "total_false_skips": 13,
+      "total_false_passes": 18
+    },
+    {
+      "policy": "Reference Baseline: Pass All to Qwen (No Filter)",
+      "articles_passed": 150,
+      "articles_skipped": 0,
+      "pct_passed": 100.0,
+      "qwen_reduction_pct": 0.0,
+      "must_know_passed": 64,
+      "must_know_total": 64,
+      "must_know_recall_pct": 100.0,
+      "must_know_false_negatives": 0,
+      "noise_passed": 18,
+      "noise_total": 18,
+      "noise_filtered": 0,
+      "noise_filter_rate_pct": 0.0,
+      "interesting_passed": 68,
+      "interesting_total": 68,
+      "interesting_skipped": 0,
+      "total_false_skips": 0,
+      "total_false_passes": 18
+    }
+  ]
+}

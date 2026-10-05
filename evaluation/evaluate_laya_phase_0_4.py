@@ -17,7 +17,7 @@ import resource
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics import (
@@ -29,7 +29,13 @@ from sklearn.metrics import (
     recall_score,
 )
 
+if TYPE_CHECKING:
+    import laya
+
 logger = logging.getLogger(__name__)
+
+# Zero-division fallback parameter for sklearn metrics
+ZERO_DIVISION: Any = 0
 
 CANONICAL_CLASSES = ["MUST_KNOW", "INTERESTING", "NOISE"]
 
@@ -278,6 +284,51 @@ def map_prediction_to_canonical(
         raise ValueError(f"Unknown formulation: '{formulation}'")
 
 
+def map_prediction_to_canonical_corrected(
+    formulation: str,
+    raw_choice: str,
+    raw_probabilities: Dict[str, float],
+) -> Tuple[str, Dict[str, float]]:
+    """
+    Corrected canonical probability mapping using 3-way probability argmax:
+    MUST_KNOW   = P(high)
+    INTERESTING = P(medium)
+    NOISE       = P(low) + P(ignore)
+    predicted_label = argmax(canonical_probs)
+
+    For rubric_aligned, the raw output already has 3 classes:
+    must_know, interesting, noise, which map directly to MUST_KNOW, INTERESTING, NOISE.
+    """
+    if formulation == "baseline":
+        p_mk = round(float(raw_probabilities.get("high", 0.0)), 4)
+        p_int = round(float(raw_probabilities.get("medium", 0.0)), 4)
+        p_noi = round(
+            float(raw_probabilities.get("low", 0.0)) + float(raw_probabilities.get("ignore", 0.0)),
+            4,
+        )
+        canonical_probs = {
+            "MUST_KNOW": p_mk,
+            "INTERESTING": p_int,
+            "NOISE": p_noi,
+        }
+        mapped_label = max(canonical_probs.items(), key=lambda x: x[1])[0]
+        return mapped_label, canonical_probs
+
+    elif formulation == "rubric_aligned":
+        clean_choice = raw_choice.strip().lower()
+        if clean_choice not in RUBRIC_IMPORTANCE_MAP:
+            raise ValueError(f"Unrecognized rubric importance choice: '{raw_choice}'")
+        mapped_label = RUBRIC_IMPORTANCE_MAP[clean_choice]
+        canonical_probs = {
+            "MUST_KNOW": round(float(raw_probabilities.get("must_know", 0.0)), 4),
+            "INTERESTING": round(float(raw_probabilities.get("interesting", 0.0)), 4),
+            "NOISE": round(float(raw_probabilities.get("noise", 0.0)), 4),
+        }
+        return mapped_label, canonical_probs
+    else:
+        raise ValueError(f"Unknown formulation: '{formulation}'")
+
+
 def compute_comprehensive_metrics(
     y_true: List[str],
     y_pred: List[str],
@@ -297,14 +348,18 @@ def compute_comprehensive_metrics(
     incorrect = total - correct
 
     p_macro, r_macro, f1_macro, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average="macro", zero_division=0
+        y_true, y_pred, labels=CANONICAL_CLASSES, average="macro", zero_division=ZERO_DIVISION
     )
     p_weighted, r_weighted, f1_weighted, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average="weighted", zero_division=0
+        y_true, y_pred, labels=CANONICAL_CLASSES, average="weighted", zero_division=ZERO_DIVISION
     )
-    p_class, r_class, f1_class, support_class = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average=None, zero_division=0
+    res_class = precision_recall_fscore_support(
+        y_true, y_pred, labels=CANONICAL_CLASSES, average=None, zero_division=ZERO_DIVISION
     )
+    p_class: np.ndarray = np.asarray(res_class[0])
+    r_class: np.ndarray = np.asarray(res_class[1])
+    f1_class: np.ndarray = np.asarray(res_class[2])
+    support_class: np.ndarray = np.asarray(res_class[3])
 
     cm = confusion_matrix(y_true, y_pred, labels=CANONICAL_CLASSES)
 
@@ -342,16 +397,16 @@ def compute_comprehensive_metrics(
     # 1. MUST_KNOW vs NOT_MUST_KNOW
     y_true_mk = [1 if y == "MUST_KNOW" else 0 for y in y_true]
     y_pred_mk = [1 if y == "MUST_KNOW" else 0 for y in y_pred]
-    mk_binary_p = precision_score(y_true_mk, y_pred_mk, zero_division=0)
-    mk_binary_r = recall_score(y_true_mk, y_pred_mk, zero_division=0)
-    mk_binary_f1 = f1_score(y_true_mk, y_pred_mk, zero_division=0)
+    mk_binary_p = precision_score(y_true_mk, y_pred_mk, zero_division=ZERO_DIVISION)
+    mk_binary_r = recall_score(y_true_mk, y_pred_mk, zero_division=ZERO_DIVISION)
+    mk_binary_f1 = f1_score(y_true_mk, y_pred_mk, zero_division=ZERO_DIVISION)
 
     # 2. NOISE vs NOT_NOISE
     y_true_noi = [1 if y == "NOISE" else 0 for y in y_true]
     y_pred_noi = [1 if y == "NOISE" else 0 for y in y_pred]
-    noi_binary_p = precision_score(y_true_noi, y_pred_noi, zero_division=0)
-    noi_binary_r = recall_score(y_true_noi, y_pred_noi, zero_division=0)
-    noi_binary_f1 = f1_score(y_true_noi, y_pred_noi, zero_division=0)
+    noi_binary_p = precision_score(y_true_noi, y_pred_noi, zero_division=ZERO_DIVISION)
+    noi_binary_r = recall_score(y_true_noi, y_pred_noi, zero_division=ZERO_DIVISION)
+    noi_binary_f1 = f1_score(y_true_noi, y_pred_noi, zero_division=ZERO_DIVISION)
 
     return {
         "total_count": total,
@@ -405,7 +460,7 @@ def compute_comprehensive_metrics(
 def evaluate_operational_gate(
     predictions: List[Dict[str, Any]],
     policy_name: str,
-    pass_condition_fn,
+    pass_condition_fn: Callable[[Dict[str, Any]], bool],
 ) -> Dict[str, Any]:
     """
     Evaluate an operational gating policy against the 150 gold-standard articles.

@@ -14,12 +14,18 @@ import resource
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 
+if TYPE_CHECKING:
+    import laya
+
 logger = logging.getLogger(__name__)
+
+# Zero-division fallback parameter for sklearn metrics
+ZERO_DIVISION: Any = 0
 
 CANONICAL_CLASSES = ["MUST_KNOW", "INTERESTING", "NOISE"]
 
@@ -109,11 +115,37 @@ def map_laya_importance(importance_choice: str) -> str:
     """
     Map Laya raw importance choice ('high', 'medium', 'low', 'ignore')
     to canonical human ground-truth labels ('MUST_KNOW', 'INTERESTING', 'NOISE').
+    Historical mapping using 4-way choice argmax.
     """
     clean = importance_choice.strip().lower()
     if clean not in IMPORTANCE_TO_HUMAN_LABEL:
         raise ValueError(f"Unrecognized Laya importance choice: '{importance_choice}'")
     return IMPORTANCE_TO_HUMAN_LABEL[clean]
+
+
+def map_laya_importance_probabilities(
+    raw_probabilities: Dict[str, float],
+) -> Tuple[str, Dict[str, float]]:
+    """
+    Corrected canonical mapping using 3-way probability argmax:
+    MUST_KNOW   = P(high)
+    INTERESTING = P(medium)
+    NOISE       = P(low) + P(ignore)
+    predicted_label = argmax(canonical_probabilities)
+    """
+    p_mk = round(float(raw_probabilities.get("high", 0.0)), 4)
+    p_int = round(float(raw_probabilities.get("medium", 0.0)), 4)
+    p_noi = round(
+        float(raw_probabilities.get("low", 0.0)) + float(raw_probabilities.get("ignore", 0.0)),
+        4,
+    )
+    canonical_probs = {
+        "MUST_KNOW": p_mk,
+        "INTERESTING": p_int,
+        "NOISE": p_noi,
+    }
+    mapped_label = max(canonical_probs.items(), key=lambda x: x[1])[0]
+    return mapped_label, canonical_probs
 
 
 def compute_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str, Any]:
@@ -129,15 +161,19 @@ def compute_metrics(y_true: List[str], y_pred: List[str]) -> Dict[str, Any]:
     incorrect = total - correct
 
     p_macro, r_macro, f1_macro, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average="macro", zero_division=0
+        y_true, y_pred, labels=CANONICAL_CLASSES, average="macro", zero_division=ZERO_DIVISION
     )
     p_weighted, r_weighted, f1_weighted, _ = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average="weighted", zero_division=0
+        y_true, y_pred, labels=CANONICAL_CLASSES, average="weighted", zero_division=ZERO_DIVISION
     )
 
-    p_class, r_class, f1_class, support_class = precision_recall_fscore_support(
-        y_true, y_pred, labels=CANONICAL_CLASSES, average=None, zero_division=0
+    res_class = precision_recall_fscore_support(
+        y_true, y_pred, labels=CANONICAL_CLASSES, average=None, zero_division=ZERO_DIVISION
     )
+    p_class: np.ndarray = np.asarray(res_class[0])
+    r_class: np.ndarray = np.asarray(res_class[1])
+    f1_class: np.ndarray = np.asarray(res_class[2])
+    support_class: np.ndarray = np.asarray(res_class[3])
 
     cm = confusion_matrix(y_true, y_pred, labels=CANONICAL_CLASSES)
 
