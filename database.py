@@ -133,5 +133,18 @@ def init_db(db_path=None):
             )
         """)
 
+        # ArXiv daily selection log table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS arxiv_selection_log (
+                article_id INTEGER PRIMARY KEY,
+                selected_date TEXT NOT NULL,
+                score REAL NOT NULL,
+                announce_type TEXT,
+                promoted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(article_id) REFERENCES articles(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_arxiv_selection_date ON arxiv_selection_log(selected_date)")
+
         conn.commit()
 

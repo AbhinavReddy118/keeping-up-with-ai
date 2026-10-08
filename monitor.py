@@ -26,6 +26,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from config import (
+    ARXIV_DAILY_ANALYSIS_BUDGET,
     DATABASE_PATH,
     LLM_BATCH_SIZE,
     LLM_MAX_RETRIES,
@@ -35,6 +36,11 @@ from config import (
     MONITOR_POLL_INTERVAL_TIER2_MINUTES,
     MONITOR_POLL_INTERVAL_TIER3_HOURS,
     TELEGRAM_MIN_SCORE,
+)
+from arxiv_selector import (
+    is_arxiv_article,
+    promote_top_arxiv_candidates,
+    reclassify_unprocessed_arxiv_articles,
 )
 from database import get_connection, init_db
 from deduplication import deduplicate_articles
@@ -83,18 +89,22 @@ class ContinuousMonitor:
         max_retries: int = LLM_MAX_RETRIES,
         heartbeat_interval: int = MONITOR_HEARTBEAT_SECONDS,
         provider: Any = None,
+        arxiv_daily_budget: int = ARXIV_DAILY_ANALYSIS_BUDGET,
     ):
         self.db_path = db_path or str(DATABASE_PATH)
         self.batch_size = max(1, batch_size)
         self.max_retries = max(1, max_retries)
         self.heartbeat_interval = max(5, heartbeat_interval)
         self.provider = provider
+        self.arxiv_daily_budget = max(0, arxiv_daily_budget)
         self.running = False
         self.stop_event = threading.Event()
         self._last_heartbeat_time = 0.0
 
         init_db(self.db_path)
         self.init_source_states()
+        with self._open_conn() as conn:
+            reclassify_unprocessed_arxiv_articles(conn=conn)
         self.batch_processor = BatchProcessor(
             provider=self.provider,
             batch_size=self.batch_size,
@@ -220,15 +230,17 @@ class ContinuousMonitor:
                             row = c.fetchone()
                             if row:
                                 aid = row["id"]
+                                is_arxiv = is_arxiv_article(name, article.get("link", ""))
+                                initial_stage = "STORED" if is_arxiv else "NEW"
                                 conn.execute(
                                     """
                                     INSERT OR IGNORE INTO article_pipeline_state (
                                         article_id, stage, created_at, updated_at
-                                    ) VALUES (?, 'NEW', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                    ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                                     """,
-                                    (aid,),
+                                    (aid, initial_stage),
                                 )
-                                logger.info("[ARTICLE %d] stored", aid)
+                                logger.info("[ARTICLE %d] stored (stage: %s)", aid, initial_stage)
                                 new_inserted += 1
                     except Exception as save_err:
                         logger.error("[%s] storage error for '%s': %s", name.upper(), article.get("link"), save_err)
@@ -287,6 +299,18 @@ class ContinuousMonitor:
             inserted = self.poll_single_source(src)
             total_inserted += inserted
         return total_inserted
+
+    def select_and_promote_arxiv_articles(self) -> int:
+        """
+        Promote top-ranked stored arXiv articles up to the daily analysis budget.
+        Returns count of newly promoted articles.
+        """
+        with self._open_conn() as conn:
+            promoted_ids = promote_top_arxiv_candidates(
+                daily_budget=self.arxiv_daily_budget,
+                conn=conn,
+            )
+            return len(promoted_ids)
 
     def process_pending_articles(self) -> int:
         """
@@ -600,8 +624,11 @@ class ContinuousMonitor:
             total_src = src_row["total"] or 0
             healthy_src = src_row["healthy"] or 0
 
-            c.execute("SELECT COUNT(*) as pending FROM article_pipeline_state WHERE stage != 'NOTIFIED' AND stage != 'FAILED'")
+            c.execute("SELECT COUNT(*) as pending FROM article_pipeline_state WHERE stage IN ('NEW', 'ENRICHED', 'ANALYSIS_PENDING')")
             pending_count = c.fetchone()["pending"] or 0
+
+            c.execute("SELECT COUNT(*) as stored FROM article_pipeline_state WHERE stage = 'STORED'")
+            stored_count = c.fetchone()["stored"] or 0
 
             c.execute("SELECT COUNT(*) as completed FROM article_analysis WHERE status = 'completed'")
             completed_analyses = c.fetchone()["completed"] or 0
@@ -611,10 +638,11 @@ class ContinuousMonitor:
             next_due_sec = max(0, int(next_row["next_sec"])) if next_row and next_row["next_sec"] is not None else 0
 
         logger.info(
-            "[HEARTBEAT] Monitor alive | Sources: %d/%d healthy | Pending queue: %d | Analyzed: %d | Next poll in %ds",
+            "[HEARTBEAT] Monitor alive | Sources: %d/%d healthy | Pending queue: %d (Stored arXiv: %d) | Analyzed: %d | Next poll in %ds",
             healthy_src,
             total_src,
             pending_count,
+            stored_count,
             completed_analyses,
             next_due_sec,
         )
@@ -641,6 +669,7 @@ class ContinuousMonitor:
     def step(self, force_poll: bool = False) -> Dict[str, int]:
         """Execute one complete monitoring cycle."""
         inserted = self.poll_due_sources(force_all=force_poll)
+        promoted = self.select_and_promote_arxiv_articles()
         analyzed = self.process_pending_articles()
         notified = self.send_notifications()
 
@@ -652,6 +681,7 @@ class ContinuousMonitor:
 
         return {
             "inserted": inserted,
+            "promoted": promoted,
             "analyzed": analyzed,
             "notified": notified,
         }
