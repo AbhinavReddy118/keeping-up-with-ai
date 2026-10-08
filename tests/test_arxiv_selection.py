@@ -184,13 +184,13 @@ def test_scoring_is_deterministic():
 # 5. Scoring categories work
 # ------------------------------------------------------------------------------
 def test_scoring_categories_work():
-    # Foundation title match (+3.0) + Safety title match (+3.0) + 2-category synergy (+2.0) + new bonus (+1.0) = 9.0
+    # Foundation title match (+3.0) + Safety title match (+3.0) + 2-category synergy (+1.5) + new bonus (+1.0) = 8.5
     title = "Multimodal Alignment in Transformers"
     summary = "Announce Type: new Abstract: Novel techniques for vision models."
     score, details = score_arxiv_article(title, summary, announce_type="new")
     assert "foundation_model" in details["matched_categories"]
     assert "safety_security" in details["matched_categories"]
-    assert details["synergy_bonus"] == 2.0
+    assert details["synergy_bonus"] == 1.5
     assert score >= 8.0
 
 
@@ -515,3 +515,90 @@ def test_diagnostic_report_mechanism(temp_db):
     text = format_arxiv_selection_report(report_data)
     assert "ARXIV ANALYSIS SELECTION DIAGNOSTIC" in text
     assert "Frontier Vision-Language Model" in text
+
+
+# ------------------------------------------------------------------------------
+# 18. Synergy bonus levels (+1.5 for >=2, +2.5 for >=3)
+# ------------------------------------------------------------------------------
+def test_synergy_bonus_levels():
+    # 1 category: only foundation_model -> synergy = 0.0
+    _, det1 = score_arxiv_article("Transformer Architecture", "Abstract: Study of transformers.", announce_type="new")
+    assert len(det1["matched_categories"]) == 1
+    assert det1["synergy_bonus"] == 0.0
+
+    # 2 categories: foundation_model + systems_efficiency -> synergy = 1.5
+    _, det2 = score_arxiv_article("Transformer with KV Cache", "Abstract: Study of kv caches.", announce_type="new")
+    assert len(det2["matched_categories"]) == 2
+    assert det2["synergy_bonus"] == 1.5
+
+    # 3 categories: foundation_model + systems_efficiency + safety_security -> synergy = 2.5
+    _, det3 = score_arxiv_article("Transformer with KV Cache and Unlearning", "Abstract: Study.", announce_type="new")
+    assert len(det3["matched_categories"]) == 3
+    assert det3["synergy_bonus"] == 2.5
+
+
+# ------------------------------------------------------------------------------
+# 19. New frontier signals detection
+# ------------------------------------------------------------------------------
+def test_new_frontier_signals_detection():
+    # KV cache in systems_efficiency
+    _, d1 = score_arxiv_article("Optimizing KV Cache for Long Contexts", "Abstract: KV-cache eviction.")
+    assert "KV cache" in d1["title_matches"].get("systems_efficiency", [])
+    assert "long-context" in d1["title_matches"].get("foundation_model", [])
+
+    # FlashAttention in systems_efficiency
+    _, d2 = score_arxiv_article("Scaling with FlashAttention-2", "Abstract: Accelerated kernel.")
+    assert "FlashAttention" in d2["title_matches"].get("systems_efficiency", [])
+
+    # Context window in foundation_model
+    _, d3 = score_arxiv_article("Extending Context Windows to 1M Tokens", "Abstract: Context window scaling.")
+    assert "context window" in d3["title_matches"].get("foundation_model", [])
+
+    # Mechanistic interpretability & representation engineering & activation patching
+    _, d4 = score_arxiv_article("Mechanistic Interpretability of Transformers", "Abstract: Using representation engineering and activation patching.")
+    assert "mechanistic interpretability" in d4["title_matches"].get("foundation_model", [])
+    assert "representation engineering" in d4["abstract_matches"].get("foundation_model", [])
+    assert "activation patching" in d4["abstract_matches"].get("foundation_model", [])
+
+    # Probing in foundation_model
+    _, d5 = score_arxiv_article("Probing Hidden Representations in LLMs", "Abstract: Linear probing analysis.")
+    assert "probing" in d5["title_matches"].get("foundation_model", [])
+
+    # Synthetic data & data curation in foundation_model
+    _, d6 = score_arxiv_article("Synthetic Data for Foundation Model Pretraining", "Abstract: Automated data curation pipeline.")
+    assert "synthetic data" in d6["title_matches"].get("foundation_model", [])
+    assert "data curation" in d6["abstract_matches"].get("foundation_model", [])
+
+    # DPO & Direct Preference Optimization in reasoning_agents
+    _, d7 = score_arxiv_article("Beyond DPO: Direct Preference Optimization Frontiers", "Abstract: Aligning reasoning models.")
+    assert "DPO" in d7["title_matches"].get("reasoning_agents", [])
+    assert "Direct Preference Optimization" in d7["title_matches"].get("reasoning_agents", [])
+
+    # ORPO & SimPO in reasoning_agents
+    _, d8 = score_arxiv_article("Empirical Comparison of ORPO and SimPO", "Abstract: Direct preference methods.")
+    assert "ORPO" in d8["title_matches"].get("reasoning_agents", [])
+    assert "SimPO" in d8["title_matches"].get("reasoning_agents", [])
+
+    # Unlearning in safety_security
+    _, d9 = score_arxiv_article("Machine Unlearning in Large Language Models", "Abstract: Safe forgetting.")
+    assert "unlearning" in d9["title_matches"].get("safety_security", [])
+
+
+# ------------------------------------------------------------------------------
+# 20. Regex precision and word boundaries
+# ------------------------------------------------------------------------------
+def test_regex_precision_and_boundaries():
+    # Case sensitivity for DPO / ORPO / SimPO
+    _, d_low = score_arxiv_article("The dpo of orpo was simple", "Abstract: Generic text with lowercase dpo.")
+    assert "DPO" not in d_low["title_matches"].get("reasoning_agents", [])
+    assert "ORPO" not in d_low["title_matches"].get("reasoning_agents", [])
+    assert "SimPO" not in d_low["title_matches"].get("reasoning_agents", [])
+
+    # KV cache requires cache
+    _, d_kv = score_arxiv_article("A 50 kV transmission line power monitor", "Abstract: High voltage kv measurements.")
+    assert "KV cache" not in d_kv["title_matches"].get("systems_efficiency", [])
+
+    # Substring safety for RAG (e.g. fragment or courage)
+    _, d_rag = score_arxiv_article("Fragmented Courage in Drama", "Abstract: Courageous fragments.")
+    assert "RAG" not in d_rag["title_matches"].get("foundation_model", [])
+

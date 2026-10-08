@@ -51,6 +51,17 @@ CATEGORIES_DEF: Dict[str, List[Tuple[str, str, bool]]] = {
         ("RAG", r"\b(?:RAG|retrieval[- ]augmented(?: generation)?)\b", True),
         ("language model", r"\blanguage models?\b", False),
         ("multimodal", r"\bmultimodal\b", False),
+        # Long-context / architecture signals
+        ("long-context", r"\blong[- ]contexts?\b", False),
+        ("context window", r"\bcontext windows?\b", False),
+        # Mechanistic interpretability & representation analysis
+        ("mechanistic interpretability", r"\bmechanistic interpretability\b", False),
+        ("representation engineering", r"\brepresentation engineering\b", False),
+        ("probing", r"\bprobing\b", False),
+        ("activation patching", r"\bactivation patching\b", False),
+        # Synthetic data & curation
+        ("synthetic data", r"\bsynthetic data\b", False),
+        ("data curation", r"\bdata curation\b", False),
     ],
     "reasoning_agents": [
         ("agentic", r"\bagentic\b", False),
@@ -60,6 +71,11 @@ CATEGORIES_DEF: Dict[str, List[Tuple[str, str, bool]]] = {
         ("reinforcement learning", r"\breinforcement learning\b", False),
         ("agent", r"\bagents?\b", False),
         ("planning", r"\bplanning\b", False),
+        # Direct preference alignment signals
+        ("DPO", r"\bDPO\b", True),
+        ("Direct Preference Optimization", r"\bdirect preference optimization\b", False),
+        ("ORPO", r"\bORPO\b", True),
+        ("SimPO", r"\b(?:SimPO|simpo)\b", True),
     ],
     "systems_efficiency": [
         ("speculative decoding", r"\bspeculative decoding\b", False),
@@ -69,6 +85,9 @@ CATEGORIES_DEF: Dict[str, List[Tuple[str, str, bool]]] = {
         ("acceleration", r"\bacceleration\b", False),
         ("inference", r"\binference\b", False),
         ("efficient", r"\befficient(?:cy)?\b", False),
+        # Attention / cache efficiency
+        ("KV cache", r"\bkv[- ]caches?\b", False),
+        ("FlashAttention", r"\bflashattention(?:[- ]?\d+)?\b", False),
     ],
     "safety_security": [
         ("alignment", r"\balignment\b", False),
@@ -78,6 +97,8 @@ CATEGORIES_DEF: Dict[str, List[Tuple[str, str, bool]]] = {
         ("hallucination", r"\bhallucinations?\b", False),
         ("adversarial", r"\badversarial\b", False),
         ("safety", r"\bsafety\b", False),
+        # Safe model unlearning
+        ("unlearning", r"\bunlearning\b", False),
     ],
     "generative_robotics": [
         ("diffusion", r"\bdiffusion\b", False),
@@ -227,9 +248,9 @@ def score_arxiv_article(
     # Category synergy bonus
     synergy_bonus = 0.0
     if num_cats >= 3:
-        synergy_bonus = 4.0
+        synergy_bonus = 2.5
     elif num_cats >= 2:
-        synergy_bonus = 2.0
+        synergy_bonus = 1.5
     base_score += synergy_bonus
 
     # Generic-only safeguard
