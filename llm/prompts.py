@@ -23,6 +23,27 @@ ARTICLE METADATA:
 - Published Date: {published_at}
 - Article Content / Summary: {summary}
 
+GUIDELINES FOR SPECIFIC FIELDS:
+
+1. relevance_score:
+- Relevance means importance to an AI engineering/research intelligence system, NOT merely whether the article mentions AI.
+- High relevance: frontier models, important research, model architecture, inference/training systems, agents/reasoning, multimodal AI, AI safety/security, major AI infrastructure, significant technical developments.
+- Lower relevance: sales workflows, generic productivity tutorials, customer success stories, marketing content, generic business applications without meaningful technical development.
+
+2. novelty:
+- breakthrough: genuinely major new capability, model, architecture, method, or result with substantial significance.
+- significant: meaningful technical/research advancement that materially improves capability, efficiency, safety, reliability, or understanding.
+- incremental: routine product update, customer success story, enterprise case study, sales/marketing announcement, webinar, tutorial, workflow guide, minor feature update, or applied deployment without a major technical contribution.
+- unknown: insufficient evidence in the supplied article to determine novelty.
+- IMPORTANT: Commercial customer stories, sales tutorials, webinars, workflow guides, and marketing announcements should NOT receive "significant" merely because they involve AI.
+
+3. key_points:
+- Key points must synthesize the article rather than mechanically repeat clauses from the title.
+- Do not split a short title/list into multiple tautological bullets.
+- For very short source material, return fewer useful points rather than padding the output.
+- Never invent missing technical details.
+- Every key point must provide information that is useful beyond simply restating the title.
+
 EXPECTED JSON SCHEMA:
 {{
   "relevance_score": <float between 0.0 and 1.0 indicating relevance to artificial intelligence>,

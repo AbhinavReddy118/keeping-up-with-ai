@@ -2,10 +2,13 @@
 Structured analysis contract and data models for article analysis.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, Any
 from llm.exceptions import LLMSchemaValidationError
 from llm.prompts import ANALYSIS_PROMPT_VERSION
+
+logger = logging.getLogger(__name__)
 
 VALID_EVENT_TYPES = {
     "model_release",
@@ -66,6 +69,7 @@ class AnalysisResult:
     entities: dict[str, list[str]] = field(default_factory=dict)
     prompt_version: str = ANALYSIS_PROMPT_VERSION
     raw_response: Optional[str] = None
+    diagnostics: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         # 1. Validate relevance_score
@@ -118,9 +122,13 @@ class AnalysisResult:
         self.event_type = clean_event
 
         # 6. Validate novelty
-        clean_novelty = str(self.novelty).strip().lower() if self.novelty else "unknown"
+        if not isinstance(self.novelty, str):
+            raise LLMSchemaValidationError(f"Field 'novelty' must be a string, got {type(self.novelty).__name__}.")
+        clean_novelty = self.novelty.strip().lower()
         if clean_novelty not in VALID_NOVELTY_LEVELS:
-            clean_novelty = "unknown"
+            raise LLMSchemaValidationError(
+                f"Invalid novelty: {self.novelty!r}. Must be one of: {sorted(VALID_NOVELTY_LEVELS)}"
+            )
         self.novelty = clean_novelty
 
         # 7. Aggregate entities composite if not populated
@@ -141,35 +149,55 @@ class AnalysisResult:
         if not isinstance(data, dict):
             raise LLMSchemaValidationError(f"Expected dictionary for analysis result, got {type(data).__name__}.")
 
-        required_keys = {"relevance_score", "summary", "key_points", "topics", "technologies", "companies", "people", "models", "event_type", "novelty", "confidence"}
-        missing_keys = required_keys - set(data.keys())
+        diagnostics: list[str] = []
+        normalized_data = dict(data)
+
+        # Narrow normalization: if "novelty" is completely missing, default to "unknown"
+        # and record diagnostic indication so model/schema omissions are observable.
+        if "novelty" not in normalized_data:
+            normalized_data["novelty"] = "unknown"
+            diag_msg = "Field 'novelty' missing from analysis payload; defaulted to 'unknown'"
+            diagnostics.append(diag_msg)
+            logger.warning(diag_msg)
+
+        required_keys = {
+            "relevance_score", "summary", "key_points", "topics",
+            "technologies", "companies", "people", "models",
+            "event_type", "novelty", "confidence"
+        }
+        missing_keys = required_keys - set(normalized_data.keys())
         if missing_keys:
             raise LLMSchemaValidationError(f"Analysis result missing required keys: {sorted(missing_keys)}")
 
-        entities = data.get("entities")
+        entities = normalized_data.get("entities")
         if not isinstance(entities, dict):
             entities = {
-                "companies": data.get("companies", []),
-                "models": data.get("models", []),
-                "people": data.get("people", []),
-                "technologies": data.get("technologies", []),
+                "companies": normalized_data.get("companies", []),
+                "models": normalized_data.get("models", []),
+                "people": normalized_data.get("people", []),
+                "technologies": normalized_data.get("technologies", []),
             }
 
+        existing_diags = normalized_data.get("diagnostics")
+        if isinstance(existing_diags, list):
+            diagnostics = list(existing_diags) + diagnostics
+
         return cls(
-            relevance_score=data["relevance_score"],
-            summary=data["summary"],
-            key_points=data.get("key_points", []),
-            topics=data.get("topics", []),
-            technologies=data.get("technologies", []),
-            companies=data.get("companies", []),
-            people=data.get("people", []),
-            models=data.get("models", []),
-            event_type=data.get("event_type", "unknown"),
-            novelty=data.get("novelty", "unknown"),
-            confidence=data.get("confidence", 1.0),
+            relevance_score=normalized_data["relevance_score"],
+            summary=normalized_data["summary"],
+            key_points=normalized_data.get("key_points", []),
+            topics=normalized_data.get("topics", []),
+            technologies=normalized_data.get("technologies", []),
+            companies=normalized_data.get("companies", []),
+            people=normalized_data.get("people", []),
+            models=normalized_data.get("models", []),
+            event_type=normalized_data.get("event_type", "unknown"),
+            novelty=normalized_data["novelty"],
+            confidence=normalized_data.get("confidence", 1.0),
             entities=entities,
             prompt_version=prompt_version,
             raw_response=raw_response,
+            diagnostics=diagnostics,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -189,4 +217,5 @@ class AnalysisResult:
             "entities": self.entities,
             "prompt_version": self.prompt_version,
             "raw_response": self.raw_response,
+            "diagnostics": self.diagnostics,
         }

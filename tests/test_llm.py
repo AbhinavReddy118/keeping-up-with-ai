@@ -4,6 +4,7 @@ No real network or external API calls are made.
 """
 
 import json
+import logging
 import urllib.error
 from unittest.mock import patch, MagicMock
 import pytest
@@ -578,3 +579,124 @@ def test_ollama_provider_schema_validation_failure(sample_article):
         provider = get_llm_provider("ollama")
         with pytest.raises(LLMSchemaValidationError):
             analyze_article(sample_article, provider=provider)
+
+
+# ==============================================================================
+# NOVELTY HARDENING & PROMPT GUIDANCE TESTS (TASK 3)
+# ==============================================================================
+
+def test_valid_analysis_containing_novelty_remains_unchanged(valid_llm_output_dict):
+    """1. Valid analysis containing novelty remains unchanged."""
+    for level in ["breakthrough", "significant", "incremental", "unknown"]:
+        data = dict(valid_llm_output_dict, novelty=level)
+        result = AnalysisResult.from_dict(data)
+        assert result.novelty == level
+        assert result.diagnostics == []
+
+
+def test_missing_novelty_defaults_to_unknown(valid_llm_output_dict):
+    """2. Missing novelty defaults to 'unknown'."""
+    data = dict(valid_llm_output_dict)
+    del data["novelty"]
+    result = AnalysisResult.from_dict(data)
+    assert result.novelty == "unknown"
+
+
+def test_missing_novelty_produces_observable_diagnostic_and_log(valid_llm_output_dict, caplog):
+    """3. Missing novelty produces an observable diagnostic flag and log."""
+    data = dict(valid_llm_output_dict)
+    del data["novelty"]
+    with caplog.at_level(logging.WARNING):
+        result = AnalysisResult.from_dict(data)
+
+    # Observable in-memory diagnostic
+    assert len(result.diagnostics) > 0
+    assert any("novelty" in d.lower() for d in result.diagnostics)
+    # Observable in serialized dictionary
+    res_dict = result.to_dict()
+    assert "diagnostics" in res_dict
+    assert any("novelty" in d.lower() for d in res_dict["diagnostics"])
+    # Observable in logging
+    assert any("novelty" in record.message.lower() for record in caplog.records)
+
+
+def test_invalid_or_malformed_novelty_still_fails_validation(valid_llm_output_dict):
+    """4. Invalid/malformed novelty still fails validation."""
+    invalid_cases = [
+        "super_breakthrough",
+        "invalid_label",
+        "",
+        None,
+        123,
+        ["breakthrough"],
+    ]
+    for bad_novelty in invalid_cases:
+        data = dict(valid_llm_output_dict, novelty=bad_novelty)
+        with pytest.raises(LLMSchemaValidationError):
+            AnalysisResult.from_dict(data)
+
+
+def test_missing_other_required_fields_still_fails_validation(valid_llm_output_dict):
+    """5. Missing another required field still fails validation."""
+    # Missing summary
+    data_no_summary = dict(valid_llm_output_dict)
+    del data_no_summary["summary"]
+    with pytest.raises(LLMSchemaValidationError, match="summary"):
+        AnalysisResult.from_dict(data_no_summary)
+
+    # Missing relevance_score
+    data_no_rel = dict(valid_llm_output_dict)
+    del data_no_rel["relevance_score"]
+    with pytest.raises(LLMSchemaValidationError, match="relevance_score"):
+        AnalysisResult.from_dict(data_no_rel)
+
+    # Missing both novelty and summary -> summary should still trigger missing key error
+    data_no_both = dict(valid_llm_output_dict)
+    del data_no_both["novelty"]
+    del data_no_both["summary"]
+    with pytest.raises(LLMSchemaValidationError, match="summary"):
+        AnalysisResult.from_dict(data_no_both)
+
+
+def test_prompt_contains_novelty_guidance():
+    """6. Prompt contains the new novelty guidance."""
+    prompt = build_analysis_prompt("Test Title", "Test Source", "2026-10-08", "Test Summary")
+    prompt_lower = prompt.lower()
+    assert "breakthrough" in prompt_lower
+    assert "significant" in prompt_lower
+    assert "incremental" in prompt_lower
+    assert "unknown" in prompt_lower
+    assert "commercial customer stories" in prompt_lower or "customer success" in prompt_lower
+    assert "tutorial" in prompt_lower or "webinar" in prompt_lower
+
+
+def test_prompt_contains_relevance_guidance():
+    """7. Prompt contains the relevance guidance."""
+    prompt = build_analysis_prompt("Test Title", "Test Source", "2026-10-08", "Test Summary")
+    prompt_lower = prompt.lower()
+    assert "relevance_score" in prompt_lower
+    assert "frontier models" in prompt_lower
+    assert "sales workflows" in prompt_lower or "productivity tutorials" in prompt_lower
+    assert "intelligence system" in prompt_lower or "engineering/research" in prompt_lower
+
+
+def test_prompt_contains_key_points_synthesis_guidance():
+    """8. Prompt contains the key-point synthesis guidance."""
+    prompt = build_analysis_prompt("Test Title", "Test Source", "2026-10-08", "Test Summary")
+    prompt_lower = prompt.lower()
+    assert "key_points" in prompt_lower
+    assert "synthesize" in prompt_lower
+    assert "tautological" in prompt_lower or "mechanically repeat" in prompt_lower
+    assert "restate" in prompt_lower or "restating" in prompt_lower
+
+
+def test_existing_valid_analysis_output_compatibility(valid_llm_output_dict):
+    """9. Existing valid analysis output remains compatible."""
+    result = AnalysisResult.from_dict(valid_llm_output_dict)
+    assert result.novelty == "breakthrough"
+    assert result.relevance_score == 0.95
+    assert result.event_type == "model_release"
+    res_dict = result.to_dict()
+    assert res_dict["novelty"] == "breakthrough"
+    assert res_dict["confidence"] == 0.98
+    assert res_dict["diagnostics"] == []
