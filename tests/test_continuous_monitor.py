@@ -24,7 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from database import init_db, get_connection
-from delivery.telegram import TelegramConfig
+from delivery.telegram import TelegramConfig, TelegramDeliveryError
 from llm.models import AnalysisRequest, AnalysisResult
 from llm.provider import MockLLMProvider
 from monitor import ContinuousMonitor
@@ -481,3 +481,178 @@ def test_laya_shadow_mode_non_blocking(temp_db, mock_provider, monkeypatch):
         # Qwen analysis also succeeded
         c.execute("SELECT status FROM article_analysis WHERE article_id = ?", (art_id,))
         assert c.fetchone()["status"] == "completed"
+
+
+# --------------------------------------------------------------------------
+# 13. Complete Notification State Machine Verification
+# --------------------------------------------------------------------------
+def test_complete_notification_state_machine(temp_db, monkeypatch):
+    """
+    Verify complete notification state machine across 4 distinct article states:
+    1. Eligible analyzed article -> formatted, sent, stage set to NOTIFIED, delivery status sent.
+    2. Already-delivered article -> deduplicated, not sent again, stage set to NOTIFIED.
+    3. Incomplete analysis / wrong stage -> never selected or sent.
+    4. Simulated delivery failure -> caught, logged, attempts incremented, stage remains ANALYZED.
+    5. Retry pass -> failed article retried and delivered, previous deliveries not duplicated.
+    """
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "mock-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "mock-chat-id")
+    monkeypatch.setenv("TELEGRAM_MIN_SCORE", "0.5")
+
+    with get_connection(temp_db) as conn:
+        # Article 101: Eligible analyzed article
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (101, 'Eligible Article', 'https://example.com/101', 'OpenAI News', 'Summary 101', '2026-10-05T12:00:00Z', 'enriched')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO article_analysis (article_id, relevance_score, novelty, confidence, event_type, prompt_version, provider, model, status)
+            VALUES (101, 0.95, 'breakthrough', 0.99, 'model_release', '1.0', 'mock', 'mock', 'completed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (101, 'ANALYZED')")
+
+        # Article 102: Already delivered article
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (102, 'Already Delivered', 'https://example.com/102', 'OpenAI News', 'Summary 102', '2026-10-05T12:00:00Z', 'enriched')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO article_analysis (article_id, relevance_score, novelty, confidence, event_type, prompt_version, provider, model, status)
+            VALUES (102, 0.90, 'significant', 0.95, 'model_release', '1.0', 'mock', 'mock', 'completed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (102, 'ANALYZED')")
+        conn.execute(
+            """
+            INSERT INTO article_deliveries (article_id, channel, score, status, sent_at)
+            VALUES (102, 'telegram', 0.85, 'sent', CURRENT_TIMESTAMP)
+            """
+        )
+
+        # Article 103: Incomplete analysis (status = 'failed')
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (103, 'Incomplete Analysis', 'https://example.com/103', 'OpenAI News', 'Summary 103', '2026-10-05T12:00:00Z', 'enriched')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO article_analysis (article_id, relevance_score, novelty, confidence, event_type, prompt_version, provider, model, status)
+            VALUES (103, 0.90, 'significant', 0.95, 'model_release', '1.0', 'mock', 'mock', 'failed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (103, 'ANALYZED')")
+
+        # Article 104: Incomplete pipeline stage (stage = 'ENRICHED')
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (104, 'Enriched Not Analyzed', 'https://example.com/104', 'OpenAI News', 'Summary 104', '2026-10-05T12:00:00Z', 'enriched')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (104, 'ENRICHED')")
+
+        # Article 105: Article that fails delivery
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (105, 'Failing Delivery Article', 'https://example.com/105', 'OpenAI News', 'Summary 105', '2026-10-05T12:00:00Z', 'enriched')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO article_analysis (article_id, relevance_score, novelty, confidence, event_type, prompt_version, provider, model, status)
+            VALUES (105, 0.85, 'significant', 0.95, 'model_release', '1.0', 'mock', 'mock', 'completed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (105, 'ANALYZED')")
+        conn.commit()
+
+    monitor = ContinuousMonitor(db_path=temp_db)
+
+    # Pass 1: Delivery with simulated failure on article 105
+    sent_payloads = []
+    def mock_send(bot_token, chat_id, text, timeout=15.0):
+        if "Failing Delivery" in text:
+            raise TelegramDeliveryError("Simulated Telegram 504 timeout")
+        sent_payloads.append(text)
+        return {"ok": True, "result": {"message_id": 100}}
+
+    with patch("monitor.send_telegram_message", side_effect=mock_send):
+        sent_pass_1 = monitor.send_notifications()
+
+    # Pass 1 assertions
+    assert sent_pass_1 == 1
+    assert len(sent_payloads) == 1
+    assert "Eligible Article" in sent_payloads[0]
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+
+        # Article 101: sent and marked NOTIFIED
+        c.execute("SELECT stage, notification_attempts, last_error FROM article_pipeline_state WHERE article_id = 101")
+        p101 = c.fetchone()
+        assert p101["stage"] == "NOTIFIED"
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = 101")
+        assert c.fetchone()["status"] == "sent"
+
+        # Article 102: deduplicated, marked NOTIFIED, no re-send
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 102")
+        assert c.fetchone()["stage"] == "NOTIFIED"
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = 102")
+        assert c.fetchone()["status"] == "sent"
+
+        # Article 103: not sent, stage unchanged
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 103")
+        assert c.fetchone()["stage"] == "ANALYZED"
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = 103")
+        assert c.fetchone() is None
+
+        # Article 104: not sent, stage unchanged
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 104")
+        assert c.fetchone()["stage"] == "ENRICHED"
+
+        # Article 105: failed, stage remains ANALYZED, attempts incremented
+        c.execute("SELECT stage, notification_attempts, last_error FROM article_pipeline_state WHERE article_id = 105")
+        p105 = c.fetchone()
+        assert p105["stage"] == "ANALYZED"
+        assert p105["notification_attempts"] == 1
+        assert "Simulated Telegram 504 timeout" in p105["last_error"]
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = 105")
+        assert c.fetchone()["status"] == "failed"
+
+    # Pass 2: Retry pass where delivery succeeds
+    retry_payloads = []
+    def mock_retry_send(bot_token, chat_id, text, timeout=15.0):
+        retry_payloads.append(text)
+        return {"ok": True, "result": {"message_id": 101}}
+
+    with patch("monitor.send_telegram_message", side_effect=mock_retry_send):
+        sent_pass_2 = monitor.send_notifications()
+
+    assert sent_pass_2 == 1
+    assert len(retry_payloads) == 1
+    assert "Failing Delivery" in retry_payloads[0]
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 105")
+        assert c.fetchone()["stage"] == "NOTIFIED"
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = 105")
+        assert c.fetchone()["status"] == "sent"
+
+    # Pass 3: All eligible articles notified, 0 deliveries
+    with patch("monitor.send_telegram_message", side_effect=mock_retry_send):
+        sent_pass_3 = monitor.send_notifications()
+
+    assert sent_pass_3 == 0
+    assert len(retry_payloads) == 1  # No additional calls
