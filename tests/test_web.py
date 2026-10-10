@@ -62,6 +62,15 @@ def test_app_and_db(tmp_path, monkeypatch):
                 conn=conn,
             )
 
+        # Seed pipeline states: articles 1-3 ANALYZED, articles 4-25 NEW
+        for aid in range(1, 26):
+            st = "ANALYZED" if aid in [1, 2, 3] else "NEW"
+            conn.execute(
+                "INSERT INTO article_pipeline_state (article_id, stage) VALUES (?, ?)",
+                (aid, st),
+            )
+        conn.commit()
+
     app = create_app()
     return app, db_file
 
@@ -93,11 +102,11 @@ def test_summary_statistics_displayed(client):
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
-    # Total seeded: 25, analyzed: 3, unanalyzed: 22, sources: 2
+    # Total seeded: 25, analyzed: 3, pending: 22, sources: 2
     assert "25" in body
     assert "Total Articles" in body
     assert "Analyzed &amp; Ranked" in body or "Analyzed & Ranked" in body
-    assert "Not Yet Analyzed" in body
+    assert "Pending Analysis" in body
 
 
 def test_top_ranked_articles_appear(client):
@@ -230,3 +239,66 @@ def test_read_only_database_immutability(test_app_and_db, client):
 
     assert articles_before == articles_after == 25
     assert analysis_before == analysis_after == 3
+
+
+def test_dashboard_pending_count_reports_only_eligible_pipeline_stages(tmp_path):
+    """Dashboard pending count reports only records in NEW, ENRICHED, ANALYSIS_PENDING."""
+    from web.queries import get_summary_stats
+
+    db_file = str(tmp_path / "test_pending_stages.db")
+    init_db(db_file)
+
+    with get_connection(db_file) as conn:
+        # Create 8 articles
+        for aid in range(1, 9):
+            save_article(
+                {
+                    "title": f"Article {aid}",
+                    "link": f"https://example.com/art/{aid}",
+                    "source": "Tech AI",
+                    "published_at": f"2026-10-0{aid}T10:00:00Z",
+                    "summary": f"Summary {aid}",
+                },
+                conn=conn,
+            )
+
+        # 1: NEW (eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (1, 'NEW')")
+        # 2: ENRICHED (eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (2, 'ENRICHED')")
+        # 3: ANALYSIS_PENDING (eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (3, 'ANALYSIS_PENDING')")
+        # 4: STORED (not eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (4, 'STORED')")
+        # 5: ANALYZED (not eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (5, 'ANALYZED')")
+        # 6: NOTIFIED (not eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (6, 'NOTIFIED')")
+        # 7: FAILED (not eligible)
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (7, 'FAILED')")
+        # 8: Unstaged / no record in article_pipeline_state (not eligible)
+
+        # Mark article 5 as completed analysis
+        res = AnalysisResult(
+            relevance_score=0.9,
+            summary="Analyzed summary",
+            key_points=["Pt"],
+            topics=["AI"],
+            technologies=[],
+            companies=[],
+            people=[],
+            models=[],
+            event_type="industry_news",
+            novelty="incremental",
+            confidence=0.9,
+        )
+        save_analysis_success(5, res, "mock", "mock-model", conn=conn)
+        conn.commit()
+
+        stats = get_summary_stats(conn=conn)
+
+    assert stats["total_articles"] == 8
+    assert stats["analyzed_articles"] == 1
+    # Operational queue consists strictly of NEW (1), ENRICHED (2), ANALYSIS_PENDING (3) -> 3
+    assert stats["pending_analysis"] == 3
+    assert stats["not_yet_analyzed"] == 3

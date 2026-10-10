@@ -330,7 +330,11 @@ class ContinuousMonitor:
                 FROM articles a
                 JOIN article_pipeline_state p ON a.id = p.article_id
                 WHERE p.stage IN ('NEW', 'ENRICHED', 'ANALYSIS_PENDING')
-                ORDER BY a.id ASC
+                ORDER BY
+                    CASE WHEN a.published_at IS NULL OR trim(a.published_at) = ''
+                         THEN 1 ELSE 0 END,
+                    a.published_at DESC,
+                    a.id DESC
                 LIMIT ?
                 """,
                 (self.batch_size,),

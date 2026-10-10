@@ -656,3 +656,118 @@ def test_complete_notification_state_machine(temp_db, monkeypatch):
 
     assert sent_pass_3 == 0
     assert len(retry_payloads) == 1  # No additional calls
+
+
+def test_monitor_selects_most_recently_published_eligible_article_first(temp_db, mock_provider):
+    """Monitor process_pending_articles selects the most recently published eligible articles first."""
+    from storage import save_article
+
+    dates = [
+        ("art1", "2026-09-01T10:00:00Z"),
+        ("art2", "2026-10-05T10:00:00Z"),
+        ("art3", "2026-10-02T10:00:00Z"),
+        ("art4", "2026-10-08T10:00:00Z"),
+    ]
+    id_map = {}
+    with get_connection(temp_db) as conn:
+        for key, pub in dates:
+            link = f"https://example.com/art/{key}"
+            save_article(
+                {
+                    "title": f"Article {key}",
+                    "link": link,
+                    "source": "TechCrunch AI",
+                    "published_at": pub,
+                    "summary": f"Summary for {key} with sufficient content.",
+                },
+                conn=conn,
+            )
+            c = conn.cursor()
+            c.execute("SELECT id FROM articles WHERE link = ?", (link,))
+            aid = c.fetchone()["id"]
+            id_map[key] = aid
+            conn.execute(
+                "INSERT INTO article_pipeline_state (article_id, stage) VALUES (?, 'NEW')",
+                (aid,),
+            )
+        conn.commit()
+
+    monitor = ContinuousMonitor(db_path=temp_db, batch_size=2)
+    completed = monitor.process_pending_articles()
+
+    assert completed == 2
+
+    # The 2 most recent articles (art4: 10-08 and art2: 10-05) should be ANALYZED
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+        c.execute("SELECT article_id, stage FROM article_pipeline_state ORDER BY article_id ASC")
+        stages = {row["article_id"]: row["stage"] for row in c.fetchall()}
+
+    assert stages[id_map["art4"]] == "ANALYZED"
+    assert stages[id_map["art2"]] == "ANALYZED"
+    assert stages[id_map["art3"]] == "NEW"
+    assert stages[id_map["art1"]] == "NEW"
+
+
+def test_monitor_handles_missing_publication_dates_deterministically(temp_db, mock_provider):
+    """Monitor handles missing/blank publication dates deterministically after dated articles."""
+    from storage import save_article
+
+    articles_data = [
+        ("k10", "2026-10-01T10:00:00Z"),
+        ("k11", None),
+        ("k12", ""),
+        ("k13", "   "),
+        ("k14", "2026-10-04T10:00:00Z"),
+    ]
+    id_map = {}
+    with get_connection(temp_db) as conn:
+        for key, pub in articles_data:
+            link = f"https://example.com/art/{key}"
+            save_article(
+                {
+                    "title": f"Article {key}",
+                    "link": link,
+                    "source": "AI Weekly",
+                    "published_at": pub,
+                    "summary": f"Summary for {key} with adequate length.",
+                },
+                conn=conn,
+            )
+            c = conn.cursor()
+            c.execute("SELECT id FROM articles WHERE link = ?", (link,))
+            aid = c.fetchone()["id"]
+            id_map[key] = aid
+            conn.execute(
+                "INSERT INTO article_pipeline_state (article_id, stage) VALUES (?, 'NEW')",
+                (aid,),
+            )
+        conn.commit()
+
+    monitor = ContinuousMonitor(db_path=temp_db, batch_size=2)
+    # Pass 1: Should select dated articles (k14: 10-04, k10: 10-01)
+    pass1_count = monitor.process_pending_articles()
+    assert pass1_count == 2
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+        c.execute("SELECT article_id, stage FROM article_pipeline_state ORDER BY article_id ASC")
+        stages = {row["article_id"]: row["stage"] for row in c.fetchall()}
+
+    assert stages[id_map["k14"]] == "ANALYZED"
+    assert stages[id_map["k10"]] == "ANALYZED"
+    assert stages[id_map["k11"]] == "NEW"
+    assert stages[id_map["k12"]] == "NEW"
+    assert stages[id_map["k13"]] == "NEW"
+
+    # Pass 2: Process remaining 3 articles with missing/blank dates
+    monitor_pass2 = ContinuousMonitor(db_path=temp_db, batch_size=3)
+    pass2_count = monitor_pass2.process_pending_articles()
+    assert pass2_count == 3
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+        c.execute("SELECT article_id, stage FROM article_pipeline_state ORDER BY article_id ASC")
+        stages_final = {row["article_id"]: row["stage"] for row in c.fetchall()}
+
+    assert all(s == "ANALYZED" for s in stages_final.values())

@@ -78,8 +78,9 @@ def get_unprocessed_articles(
     conn: Optional[sqlite3.Connection] = None,
 ) -> list[dict]:
     """
-    Select articles that do not have a completed analysis record.
-    Deterministically ordered by article ID ascending.
+    Select eligible articles for analysis respecting pipeline state and recency.
+    Filters for stages ('NEW', 'ENRICHED', 'ANALYSIS_PENDING') without completed analysis.
+    Deterministically ordered by published_at DESC, id DESC (nulls/blanks last).
 
     Args:
         limit: Maximum number of articles to select.
@@ -91,9 +92,15 @@ def get_unprocessed_articles(
     query = """
         SELECT a.id, a.title, a.link, a.summary, a.source, a.published_at, a.raw_content, a.content
         FROM articles a
+        JOIN article_pipeline_state p ON a.id = p.article_id
         LEFT JOIN article_analysis an ON a.id = an.article_id
-        WHERE an.id IS NULL OR an.status != 'completed'
-        ORDER BY a.id ASC
+        WHERE p.stage IN ('NEW', 'ENRICHED', 'ANALYSIS_PENDING')
+          AND (an.id IS NULL OR an.status != 'completed')
+        ORDER BY
+            CASE WHEN a.published_at IS NULL OR trim(a.published_at) = ''
+                 THEN 1 ELSE 0 END,
+            a.published_at DESC,
+            a.id DESC
         LIMIT ?
     """
     should_close = False
@@ -471,10 +478,45 @@ class BatchProcessor:
                 detail = self.process_single_article(article, conn=conn)
                 report.details.append(detail)
 
-                if detail["status"] == "completed":
-                    report.completed += 1
+                aid = article.get("id")
+                if aid is not None:
+                    if detail["status"] == "completed":
+                        report.completed += 1
+                        conn.execute(
+                            """
+                            UPDATE article_pipeline_state SET
+                                stage = 'ANALYZED',
+                                analysis_attempts = analysis_attempts + ?,
+                                last_error = NULL,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE article_id = ?
+                            """,
+                            (detail.get("attempts", 1), aid),
+                        )
+                    else:
+                        report.failed += 1
+                        conn.execute(
+                            """
+                            UPDATE article_pipeline_state SET
+                                stage = CASE WHEN analysis_attempts + ? >= 3 THEN 'FAILED' ELSE 'ANALYSIS_PENDING' END,
+                                analysis_attempts = analysis_attempts + ?,
+                                last_error = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE article_id = ?
+                            """,
+                            (
+                                detail.get("attempts", 1),
+                                detail.get("attempts", 1),
+                                str(detail.get("error", "Unknown error")),
+                                aid,
+                            ),
+                        )
+                    conn.commit()
                 else:
-                    report.failed += 1
+                    if detail["status"] == "completed":
+                        report.completed += 1
+                    else:
+                        report.failed += 1
 
                 report.retries_attempted += detail["retries"]
 

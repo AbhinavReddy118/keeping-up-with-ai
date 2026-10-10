@@ -154,12 +154,20 @@ def get_summary_stats(conn: Optional[sqlite3.Connection] = None) -> dict:
         row = cursor.fetchone()
         last_updated = row["last_updated"] if row and row["last_updated"] else None
 
-        not_yet_analyzed = max(0, total_articles - analyzed_articles)
+        cursor.execute(
+            """
+            SELECT COUNT(*) as pending
+            FROM article_pipeline_state
+            WHERE stage IN ('NEW', 'ENRICHED', 'ANALYSIS_PENDING')
+            """
+        )
+        pending_analysis = cursor.fetchone()["pending"]
 
         return {
             "total_articles": total_articles,
             "analyzed_articles": analyzed_articles,
-            "not_yet_analyzed": not_yet_analyzed,
+            "not_yet_analyzed": pending_analysis,
+            "pending_analysis": pending_analysis,
             "distinct_sources": distinct_sources,
             "last_updated": last_updated,
         }

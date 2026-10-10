@@ -165,6 +165,11 @@ def run_full_pipeline(
             retention_report["cutoff"],
         )
 
+    with _open_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(MAX(id), 0) FROM articles")
+        max_id_before = cursor.fetchone()[0]
+
     ingestion_summary = run_pipeline(
         sources=sources,
         timeout=timeout,
@@ -180,6 +185,35 @@ def run_full_pipeline(
     )
 
     if analyze:
+        # Initialize pipeline state for articles newly inserted during this run
+        # Preserves historical unstaged articles (id <= max_id_before) strictly untouched.
+        # arXiv articles are staged as 'STORED' (subject to selection gating); non-arXiv as 'NEW'.
+        with _open_connection(db_path) as conn:
+            from arxiv_selector import is_arxiv_article
+
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, source, link FROM articles
+                WHERE id > ?
+                  AND id NOT IN (SELECT article_id FROM article_pipeline_state)
+                """,
+                (max_id_before,),
+            )
+            for row in cursor.fetchall():
+                aid = row["id"]
+                is_arxiv = is_arxiv_article(row["source"] or "", row["link"] or "")
+                init_stage = "STORED" if is_arxiv else "NEW"
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO article_pipeline_state (
+                        article_id, stage, created_at, updated_at
+                    ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (aid, init_stage),
+                )
+            conn.commit()
+
         try:
             processor = BatchProcessor(
                 provider=provider,
