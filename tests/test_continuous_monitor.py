@@ -770,4 +770,215 @@ def test_monitor_handles_missing_publication_dates_deterministically(temp_db, mo
         c.execute("SELECT article_id, stage FROM article_pipeline_state ORDER BY article_id ASC")
         stages_final = {row["article_id"]: row["stage"] for row in c.fetchall()}
 
+    assert stages_final[id_map["k14"]] == "ANALYZED"
+    assert stages_final[id_map["k10"]] == "ANALYZED"
     assert all(s == "ANALYZED" for s in stages_final.values())
+
+
+# --------------------------------------------------------------------------
+# 16. Comprehensive One-Cycle Orchestration Contract
+# --------------------------------------------------------------------------
+def test_one_controlled_cycle_contract(temp_db, mock_provider, monkeypatch):
+    """
+    Verify the 10-point safe one-cycle orchestration contract:
+    1. Cycle runs once and returns execution metrics.
+    2. Newly ingested articles enter NEW and reach analysis.
+    3. Historical unstaged articles are NOT automatically swept into the queue.
+    4. STORED articles remain protected and unanalyzed.
+    5. Already ANALYZED articles are not reprocessed.
+    6. FAILED articles are not selected for analysis.
+    7. TELEGRAM_ENABLED=false prevents delivery (no messages sent, delivery marked skipped).
+    8. Monitor heartbeat/state is recorded.
+    9. One article failure does not crash or stop the cycle.
+    10. Attempted/completed/failed counts are reported.
+    """
+    monkeypatch.setenv("TELEGRAM_ENABLED", "false")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "mock-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "mock-chat")
+
+    with get_connection(temp_db) as conn:
+        # Article 1: Historical unstaged article (no pipeline state)
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (101, 'Historical Backlog Article', 'https://example.com/hist1', 'Microsoft Research', 'Old article summary.', '2026-08-01T00:00:00Z', 'not_needed')
+            """
+        )
+
+        # Article 2: STORED article (e.g. arXiv stored candidate)
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (102, 'Stored Arxiv Paper', 'https://arxiv.org/abs/2601.001', 'arXiv CS.AI Papers', 'Arxiv summary.', '2026-10-01T00:00:00Z', 'not_needed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (102, 'STORED')")
+
+        # Article 3: Already ANALYZED article
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (103, 'Already Analyzed Article', 'https://example.com/analyzed3', 'Google DeepMind Blog', 'Summary.', '2026-10-02T00:00:00Z', 'enriched')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO article_analysis (article_id, relevance_score, novelty, confidence, event_type, prompt_version, provider, model, status)
+            VALUES (103, 0.88, 'significant', 0.9, 'research', 'v1', 'mock', 'mock', 'completed')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (103, 'ANALYZED')")
+
+        # Article 4: FAILED article that reached max retries
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (104, 'Failed Article Exhausted', 'https://example.com/failed4', 'OpenAI News', 'Summary.', '2026-10-03T00:00:00Z', 'enriched')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage, analysis_attempts) VALUES (104, 'FAILED', 2)")
+
+        # Article 5: Pre-existing NEW article that will fail during this cycle
+        conn.execute(
+            """
+            INSERT INTO articles (id, title, link, source, summary, published_at, enrichment_status)
+            VALUES (105, 'Article Destined to Fail', 'https://example.com/will-fail', 'Hugging Face Blog', 'Summary.', '2026-10-04T00:00:00Z', 'enriched')
+            """
+        )
+        conn.execute("INSERT INTO article_pipeline_state (article_id, stage) VALUES (105, 'NEW')")
+
+        conn.commit()
+
+    monitor = ContinuousMonitor(
+        db_path=temp_db,
+        provider=mock_provider,
+        batch_size=10,
+        max_retries=2,
+        arxiv_daily_budget=0,
+    )
+
+    # Mock fetch_rss_feed_conditional to ingest 1 new article
+    mock_new_entry = [
+        {
+            "guid": "new-rss-guid",
+            "title": "Newly Ingested Frontier Paper",
+            "link": "https://example.com/new-frontier",
+            "summary": "Summary of newly ingested article.",
+            "published_at": "2026-10-05T00:00:00Z",
+        }
+    ]
+
+    original_process_single = monitor.batch_processor.process_single_article
+
+    def custom_process_single(article, conn=None):
+        if "will-fail" in article.get("link", ""):
+            return {"status": "failed", "error": "Simulated model error", "attempts": 1}
+        return original_process_single(article, conn=conn)
+
+    with patch("monitor.fetch_rss_feed_conditional", return_value=(mock_new_entry, "e_new", "m_new", False)), \
+         patch("monitor.enrich_article", return_value={"enrichment_status": "enriched", "content": "Enriched content."}), \
+         patch("monitor.send_telegram_message") as mock_telegram_send, \
+         patch.object(monitor.batch_processor, "process_single_article", side_effect=custom_process_single):
+
+        cycle_result = monitor.step(force_poll=True)
+
+    # 1. & 10. Check cycle reports attempted/completed/failed counts
+    assert cycle_result["inserted"] == 1
+    assert cycle_result["attempted"] == 2  # Article 105 and the newly ingested article
+    assert cycle_result["analyzed"] == 1   # Newly ingested succeeded
+    assert cycle_result["failed"] == 1     # Article 105 failed
+    assert cycle_result["notified"] == 0   # Telegram disabled
+
+    # 7. TELEGRAM_ENABLED=false prevents delivery: mock was never called
+    assert mock_telegram_send.call_count == 0
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+
+        # 2. Newly ingested article was analyzed and reached NOTIFIED (with skipped delivery)
+        c.execute("SELECT id FROM articles WHERE link = 'https://example.com/new-frontier'")
+        new_row = c.fetchone()
+        assert new_row is not None
+        new_aid = new_row["id"]
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = ?", (new_aid,))
+        assert c.fetchone()["stage"] == "NOTIFIED"
+        c.execute("SELECT status FROM article_deliveries WHERE article_id = ?", (new_aid,))
+        deliv = c.fetchone()
+        assert deliv is not None
+        assert deliv["status"] == "skipped"
+
+        # 3. Historical unstaged article (101) was NEVER given a pipeline state and never analyzed
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 101")
+        assert c.fetchone() is None
+        c.execute("SELECT status FROM article_analysis WHERE article_id = 101")
+        assert c.fetchone() is None
+
+        # 4. STORED article (102) remains strictly in STORED and unanalyzed
+        c.execute("SELECT stage FROM article_pipeline_state WHERE article_id = 102")
+        assert c.fetchone()["stage"] == "STORED"
+        c.execute("SELECT status FROM article_analysis WHERE article_id = 102")
+        assert c.fetchone() is None
+
+        # 5. Already ANALYZED article (103) was not reprocessed
+        c.execute("SELECT COUNT(*) as cnt FROM article_analysis WHERE article_id = 103")
+        assert c.fetchone()["cnt"] == 1
+
+        # 6. FAILED article (104) was not selected and remains FAILED
+        c.execute("SELECT stage, analysis_attempts FROM article_pipeline_state WHERE article_id = 104")
+        f_row = c.fetchone()
+        assert f_row["stage"] == "FAILED"
+        assert f_row["analysis_attempts"] == 2
+
+        # 8. Monitor heartbeat was updated
+        c.execute("SELECT status, pid FROM monitor_heartbeat WHERE id = 1")
+        hb = c.fetchone()
+        assert hb is not None
+        assert hb["status"] == "running"
+
+        # 9. One article failure did not destroy the cycle: article 105 is now in ANALYSIS_PENDING
+        c.execute("SELECT stage, analysis_attempts, last_error FROM article_pipeline_state WHERE article_id = 105")
+        p105 = c.fetchone()
+        assert p105["stage"] == "ANALYSIS_PENDING"
+        assert p105["analysis_attempts"] == 1
+        assert "Simulated model error" in p105["last_error"]
+
+
+# --------------------------------------------------------------------------
+# 17. CLI --once Execution
+# --------------------------------------------------------------------------
+def test_monitor_cli_once_flag_execution(temp_db, mock_provider, monkeypatch):
+    """Verify monitor.py CLI --once executes a single cycle and exits cleanly."""
+    from monitor import main
+
+    monkeypatch.setenv("TELEGRAM_ENABLED", "false")
+    mock_entries = [
+        {
+            "guid": "cli-once-guid",
+            "title": "CLI Once Article",
+            "link": "https://example.com/cli-once",
+            "summary": "Summary.",
+            "published_at": "2026-10-05T00:00:00Z",
+        }
+    ]
+
+    with patch("monitor.fetch_rss_feed_conditional", return_value=(mock_entries, "e", "m", False)), \
+         patch("monitor.enrich_article", return_value={"enrichment_status": "not_needed"}), \
+         patch("monitor.BatchProcessor") as mock_bp_cls:
+
+        mock_bp_instance = MagicMock()
+        mock_bp_instance.process_single_article.return_value = {
+            "status": "completed",
+            "relevance_score": 0.85,
+            "attempts": 1,
+        }
+        mock_bp_cls.return_value = mock_bp_instance
+
+        exit_code = main(["--once", "--poll-all", "--db-path", temp_db])
+        assert exit_code == 0
+
+    with get_connection(temp_db) as conn:
+        c = conn.cursor()
+        c.execute("SELECT status FROM monitor_heartbeat WHERE id = 1")
+        hb = c.fetchone()
+        assert hb is not None
+        assert hb["status"] == "stopped"

@@ -100,6 +100,7 @@ class ContinuousMonitor:
         self.running = False
         self.stop_event = threading.Event()
         self._last_heartbeat_time = 0.0
+        self.last_analysis_stats = {"attempted": 0, "completed": 0, "failed": 0}
 
         init_db(self.db_path)
         self.init_source_states()
@@ -342,9 +343,12 @@ class ContinuousMonitor:
             pending_articles = [dict(r) for r in cursor.fetchall()]
 
         if not pending_articles:
+            self.last_analysis_stats = {"attempted": 0, "completed": 0, "failed": 0}
             return 0
 
+        attempted_count = len(pending_articles)
         completed_count = 0
+        failed_count = 0
         for art in pending_articles:
             if self.stop_event.is_set():
                 break
@@ -449,6 +453,7 @@ class ContinuousMonitor:
                         conn.commit()
                         completed_count += 1
                     else:
+                        failed_count += 1
                         err = analysis_summary.get("error", "Unknown error")
                         logger.error("[ARTICLE %d] analysis failed: %s", aid, err)
                         conn.execute(
@@ -464,6 +469,7 @@ class ContinuousMonitor:
                         )
                         conn.commit()
             except Exception as batch_exc:
+                failed_count += 1
                 logger.error("[ARTICLE %d] analysis exception: %s", aid, batch_exc)
                 with self._open_conn() as conn:
                     conn.execute(
@@ -479,6 +485,11 @@ class ContinuousMonitor:
                     )
                     conn.commit()
 
+        self.last_analysis_stats = {
+            "attempted": attempted_count,
+            "completed": completed_count,
+            "failed": failed_count,
+        }
         return completed_count
 
     def send_notifications(self) -> int:
@@ -677,6 +688,12 @@ class ContinuousMonitor:
         analyzed = self.process_pending_articles()
         notified = self.send_notifications()
 
+        analysis_stats = getattr(
+            self,
+            "last_analysis_stats",
+            {"attempted": analyzed, "completed": analyzed, "failed": 0},
+        )
+
         now = time.time()
         if now - self._last_heartbeat_time >= self.heartbeat_interval:
             self.update_heartbeat("running")
@@ -686,7 +703,9 @@ class ContinuousMonitor:
         return {
             "inserted": inserted,
             "promoted": promoted,
+            "attempted": analysis_stats.get("attempted", analyzed),
             "analyzed": analyzed,
+            "failed": analysis_stats.get("failed", 0),
             "notified": notified,
         }
 

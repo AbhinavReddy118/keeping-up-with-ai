@@ -6,24 +6,27 @@
     <key>Label</key>
     <string>com.ai-news-digest.monitor</string>
 
+    <key>WorkingDirectory</key>
+    <string>/Users/apple/Desktop/ai_news_digest</string>
+
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/env</string>
-        <string>bash</string>
-        <string>-lc</string>
-        <string>cd PROJECT_DIR && ./run_monitor.sh</string>
+        <string>/Users/apple/Desktop/ai_news_digest/.venv/bin/python</string>
+        <string>/Users/apple/Desktop/ai_news_digest/monitor.py</string>
     </array>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>TELEGRAM_ENABLED</key>
+        <string>false</string>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>PROJECT_DIR/data/monitor.out.log</string>
+    <string>/Users/apple/Desktop/ai_news_digest/logs/monitor.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>PROJECT_DIR/data/monitor.err.log</string>
+    <string>/Users/apple/Desktop/ai_news_digest/logs/monitor.stderr.log</string>
 
     <key>RunAtLoad</key>
     <true/>
