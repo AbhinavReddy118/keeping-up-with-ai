@@ -49,6 +49,7 @@ from delivery.telegram import (
     format_telegram_update,
     is_article_delivered,
     record_article_delivery,
+    send_notification_for_article,
     send_telegram_message,
     TelegramDeliveryError,
 )
@@ -612,6 +613,25 @@ class ContinuousMonitor:
                     conn.commit()
 
         return sent_count
+
+    def send_notification_for_article(
+        self,
+        article_id: int,
+        config: Optional[TelegramConfig] = None,
+        mark_skipped_if_disabled: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Targeted delivery path: deliver a specific single analyzed article to Telegram.
+        Respects duplicate protection, minimum scores, and pipeline validation.
+        """
+        with self._open_conn() as conn:
+            return send_notification_for_article(
+                article_id=article_id,
+                config=config,
+                conn=conn,
+                db_path=self.db_path,
+                mark_skipped_if_disabled=mark_skipped_if_disabled,
+            )
 
     def update_heartbeat(self, status: str = "running") -> None:
         """Write monitor heartbeat and process telemetry into the database."""

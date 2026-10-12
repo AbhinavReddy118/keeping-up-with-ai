@@ -3,22 +3,42 @@
 .env.*
 .env.local
 *.env
-
+*.pem
+*.key
+*.cert
+*.crt
 
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 
 # Virtual environment
 .venv/
 venv/
+ENV/
 
-# SQLite database and run logs
+# SQLite databases, journals, and runtime state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 data/*.db
+data/*.sqlite*
+
+# Logs and runtime outputs
+logs/
+*.log
 data/*.log
 
 # macOS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 
 # IDE
 .vscode/

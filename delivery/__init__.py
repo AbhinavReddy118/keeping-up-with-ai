@@ -5,6 +5,7 @@ from delivery.telegram import (
     TelegramDeliveryError,
     deliver_ranked_articles,
     format_telegram_update,
+    send_notification_for_article,
     send_telegram_message,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "TelegramDeliveryError",
     "deliver_ranked_articles",
     "format_telegram_update",
+    "send_notification_for_article",
     "send_telegram_message",
 ]

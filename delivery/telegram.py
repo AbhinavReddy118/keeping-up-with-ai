@@ -1,11 +1,14 @@
 """Telegram delivery module for ranked AI intelligence updates."""
 
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Any, Dict, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramDeliveryError(RuntimeError):
@@ -104,15 +107,15 @@ def send_telegram_message(
     except urllib.error.HTTPError as exc:
         raise TelegramDeliveryError(
             f"Telegram returned HTTP {exc.code}: {exc.reason}"
-        ) from exc
+        ) from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise TelegramDeliveryError(
             f"Telegram delivery failed: {type(exc).__name__}"
-        ) from exc
+        ) from None
     except json.JSONDecodeError as exc:
         raise TelegramDeliveryError(
             "Telegram returned a non-JSON response"
-        ) from exc
+        ) from None
 
     if not isinstance(parsed, dict) or not parsed.get("ok"):
         description = (
@@ -292,3 +295,245 @@ def deliver_ranked_articles(
         "skipped": max(0, len(ranked_articles) - len(selected)),
         "details": details,
     }
+
+
+def send_notification_for_article(
+    article_id: int,
+    config: Optional[TelegramConfig] = None,
+    conn: Any = None,
+    db_path: Any = None,
+    mark_skipped_if_disabled: bool = False,
+) -> Dict[str, Any]:
+    """
+    Deliver a single analyzed article to Telegram with strict qualification checks.
+
+    Validates:
+    - Article ID is a positive integer
+    - Article exists in database
+    - Pipeline stage == 'ANALYZED'
+    - Analysis status == 'completed'
+    - Article has not already been successfully delivered ('sent')
+    - TELEGRAM_ENABLED is True and credentials are present
+    - Final score meets or exceeds TELEGRAM_MIN_SCORE
+
+    Updates pipeline state and article_deliveries consistently with production semantics.
+    Never mutates or processes any other article.
+    """
+    from database import get_connection
+    from ranking.scorer import score_article
+
+    if not isinstance(article_id, int) or article_id <= 0:
+        return {
+            "ok": False,
+            "status": "rejected",
+            "reason": f"Invalid article_id: {article_id}. Must be a positive integer.",
+            "article_id": article_id,
+            "delivered": False,
+        }
+
+    if config is None:
+        config = TelegramConfig.from_env()
+
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT a.id, a.title, a.source, a.published_at, a.link,
+                   p.stage, p.notification_attempts,
+                   an.status as analysis_status, an.relevance_score, an.novelty,
+                   an.confidence, an.event_type, an.summary
+            FROM articles a
+            LEFT JOIN article_pipeline_state p ON a.id = p.article_id
+            LEFT JOIN article_analysis an ON a.id = an.article_id
+            WHERE a.id = ?
+            """,
+            (article_id,),
+        )
+        row = cursor.fetchone()
+
+        # 1. Verify article exists
+        if not row:
+            return {
+                "ok": False,
+                "status": "rejected",
+                "reason": f"Article {article_id} does not exist",
+                "article_id": article_id,
+                "delivered": False,
+            }
+
+        data = dict(row)
+
+        # 2. Verify pipeline stage == 'ANALYZED'
+        current_stage = data.get("stage")
+        if current_stage != "ANALYZED":
+            return {
+                "ok": False,
+                "status": "rejected",
+                "reason": f"Article {article_id} in stage '{current_stage}', expected 'ANALYZED'",
+                "article_id": article_id,
+                "stage": current_stage,
+                "delivered": False,
+            }
+
+        # 3. Verify analysis status == 'completed'
+        analysis_status = data.get("analysis_status")
+        if analysis_status != "completed":
+            return {
+                "ok": False,
+                "status": "rejected",
+                "reason": f"Article {article_id} analysis status is '{analysis_status}', expected 'completed'",
+                "article_id": article_id,
+                "analysis_status": analysis_status,
+                "delivered": False,
+            }
+
+        # 4. Verify not already successfully delivered
+        if is_article_delivered(article_id, channel="telegram", conn=conn, db_path=db_path):
+            return {
+                "ok": False,
+                "status": "rejected",
+                "reason": f"Article {article_id} has already been delivered via telegram",
+                "article_id": article_id,
+                "delivered": False,
+            }
+
+        # 5. Compute deterministic score
+        scoring_payload = {
+            "article_id": article_id,
+            "title": data.get("title") or "",
+            "source": data.get("source") or "",
+            "published_at": data.get("published_at"),
+            "relevance_score": data.get("relevance_score"),
+            "novelty": data.get("novelty"),
+            "confidence": data.get("confidence") if data.get("confidence") is not None else 1.0,
+            "event_type": data.get("event_type"),
+            "status": "completed",
+        }
+        ranked = score_article(scoring_payload)
+        final_score = ranked.final_score if ranked else 0.0
+
+        # 6. Check Telegram configuration
+        if not config.enabled or not config.bot_token or not config.chat_id:
+            reason = "Telegram disabled" if not config.enabled else "Telegram credentials missing"
+            if mark_skipped_if_disabled:
+                cursor.execute(
+                    "UPDATE article_pipeline_state SET stage = 'NOTIFIED', updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+                    (article_id,),
+                )
+                record_article_delivery(
+                    article_id,
+                    channel="telegram",
+                    score=final_score,
+                    status="skipped",
+                    conn=conn,
+                    db_path=db_path,
+                )
+                conn.commit()
+            return {
+                "ok": False,
+                "status": "disabled",
+                "reason": f"Telegram delivery is disabled or not configured: {reason}",
+                "article_id": article_id,
+                "score": final_score,
+                "delivered": False,
+            }
+
+        # 7. Respect TELEGRAM_MIN_SCORE
+        if final_score < config.min_score:
+            logger.debug(
+                "[TELEGRAM] Article %d score (%.3f) below threshold (%.2f); skipping",
+                article_id,
+                final_score,
+                config.min_score,
+            )
+            cursor.execute(
+                "UPDATE article_pipeline_state SET stage = 'NOTIFIED', updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+                (article_id,),
+            )
+            record_article_delivery(
+                article_id,
+                channel="telegram",
+                score=final_score,
+                status="skipped",
+                conn=conn,
+                db_path=db_path,
+            )
+            conn.commit()
+            return {
+                "ok": False,
+                "status": "skipped",
+                "reason": f"Article {article_id} score ({final_score:.3f}) below threshold ({config.min_score:.2f})",
+                "article_id": article_id,
+                "score": final_score,
+                "delivered": False,
+            }
+
+        # 8. Format and send message
+        message = format_telegram_update(
+            {**data, "final_score": final_score},
+            position=1,
+            total=1,
+        )
+        try:
+            send_telegram_message(config.bot_token, config.chat_id, message)
+            logger.info("[ARTICLE %d] notification sent", article_id)
+            cursor.execute(
+                "UPDATE article_pipeline_state SET stage = 'NOTIFIED', updated_at = CURRENT_TIMESTAMP WHERE article_id = ?",
+                (article_id,),
+            )
+            record_article_delivery(
+                article_id,
+                channel="telegram",
+                score=final_score,
+                status="sent",
+                conn=conn,
+                db_path=db_path,
+            )
+            conn.commit()
+            return {
+                "ok": True,
+                "status": "sent",
+                "article_id": article_id,
+                "score": final_score,
+                "delivered": True,
+            }
+        except TelegramDeliveryError as tele_err:
+            logger.error("[TELEGRAM] failed for article %d: %s", article_id, str(tele_err))
+            cursor.execute(
+                """
+                UPDATE article_pipeline_state SET
+                    notification_attempts = notification_attempts + 1,
+                    last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE article_id = ?
+                """,
+                (str(tele_err), article_id),
+            )
+            record_article_delivery(
+                article_id,
+                channel="telegram",
+                score=final_score,
+                status="failed",
+                conn=conn,
+                db_path=db_path,
+            )
+            conn.commit()
+            return {
+                "ok": False,
+                "status": "failed",
+                "error": str(tele_err),
+                "article_id": article_id,
+                "score": final_score,
+                "delivered": False,
+            }
+    finally:
+        if should_close:
+            try:
+                conn.close()
+            except Exception:
+                pass
